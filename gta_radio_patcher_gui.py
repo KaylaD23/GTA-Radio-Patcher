@@ -71,7 +71,9 @@ class DurationPatcherGUI:
         self.input_iso_var = tk.StringVar()
         self.input_exe_var = tk.StringVar()
         self.input_vcs_irx_var = tk.StringVar()
-        self.vcs_boost_3db_var = tk.BooleanVar(value=False)
+        self.boost_radio_3db_var = tk.BooleanVar(value=False)
+        self.vcs_boost_3db_var = self.boost_radio_3db_var  # compatibility with older GUI scripts
+        self.single_station_var = tk.StringVar(value='Auto (from .VB filename)')
         self.radio_dir_var = tk.StringVar()
         self.output_iso_var = tk.StringVar()
         self.report_var = tk.StringVar()
@@ -174,7 +176,7 @@ class DurationPatcherGUI:
               command=self._patch_vcs_irx_clicked)
         self.vcs_irx_fix_button.pack(side="left")
         self.vcs_iso_install_button = ttk.Button(irx_action_bar,
-            text="INSTALL VCS VCPR INTO NEW ISO", command=self._vcs_install_clicked)
+            text="INSTALL VCS RADIO(S) INTO NEW ISO", command=self._vcs_install_clicked)
         self.vcs_iso_install_button.pack(side="left", padx=(10,0))
         ttk.Label(action_bar, textvariable=self.validation_var, style="Card.TLabel").pack(side="right", padx=(10, 0))
 
@@ -215,14 +217,21 @@ class DurationPatcherGUI:
             wraplength=1180,
             justify="left",
         ).grid(row=9, column=0, columnspan=3, sticky="w", pady=(4, 0))
-        self.vcs_gain_checkbox = ttk.Checkbutton(
-            inputs, text="Boost VCPR.VB audio by +3 dB before installing into ISO (PSX ADPCM re-encode)",
-            variable=self.vcs_boost_3db_var, style="Card.TCheckbutton")
-        self.vcs_gain_checkbox.grid(row=10, column=0, columnspan=3, sticky="w", pady=(9,0))
+        ttk.Label(inputs, text="Single VB target (VCS)", style="Card.TLabel").grid(row=10, column=0, sticky="w", pady=(6,0))
+        self.single_station_combo = ttk.Combobox(inputs, textvariable=self.single_station_var,
+            values=('Auto (from .VB filename)',) + tuple(name for _, name in get_profile('vcs_ps2').stations),
+            state='readonly', width=37)
+        self.single_station_combo.grid(row=10, column=1, sticky="w", pady=(6,0))
+        self.radio_gain_checkbox = ttk.Checkbutton(
+            inputs, text="Boost ALL detected replacement radios by +3 dB (LCS & VCS)",
+            variable=self.boost_radio_3db_var, style="Card.TCheckbutton")
+        self.radio_gain_checkbox.grid(row=11, column=0, columnspan=3, sticky="w", pady=(9,0))
+        self.vcs_gain_checkbox = self.radio_gain_checkbox  # compatibility alias
         ttk.Label(inputs,
-            text="VCS installer only: preserves existing EE/IRX/offset patches. +3 dB may clip loud passages; fade-in timing is a separate issue.",
+            text="Optional: re-encode each replacement .VB at +3 dB before the ISO build. Unselected stations are unchanged. "
+                 "Clipping is possible; this does not change the game's fade-in timing. Windows: local C++17 compiler required.",
             style="Card.TLabel", foreground="#b9c9d4", wraplength=1100).grid(
-                row=11, column=0, columnspan=3, sticky="w", pady=(2,0))
+                row=12, column=0, columnspan=3, sticky="w", pady=(2,0))
         inputs.columnconfigure(1, weight=1)
         inputs.columnconfigure(2, weight=0)
         inputs.columnconfigure(3, weight=0)
@@ -313,13 +322,14 @@ class DurationPatcherGUI:
         self.vcs_exe_fix_button.configure(state='normal' if self.profile_key == 'vcs_ps2' else 'disabled')
         self.vcs_irx_fix_button.configure(state='normal' if self.profile_key == 'vcs_ps2' else 'disabled')
         self.vcs_iso_install_button.configure(state='normal' if self.profile_key == 'vcs_ps2' else 'disabled')
-        self.vcs_gain_checkbox.configure(state='normal' if self.profile_key == 'vcs_ps2' else 'disabled')
+        self.radio_gain_checkbox.configure(state='normal')
+        self.single_station_combo.configure(state='readonly' if self.profile_key == 'vcs_ps2' else 'disabled')
         if profile.can_build:
             self.game_warning_var.set('LCS PS2: experimental ELF and CDSTREAM.IRX patches; original source required. PCSX2 gameplay remains unverified.')
             self.game_inputs_help_var.set('LCS profile: SLUS_214.23 and original MODULES/CDSTREAM.IRX; ten radio .VB streams. Optional ENGLISH.GXT / GAME.DTZ in the VB folder are included automatically. Originals are never overwritten.')
         else:
             self.game_warning_var.set('VCS PS2 target: 1 sec–4h39m per station. Exact-revision EE DIVU fix covers aligned streams to 4:39:37.152; IOP signed positions have an experimental MIPS fix; loader behaviour, EOF and ISO building remain unverified.')
-            self.game_inputs_help_var.set('VCS audio-only ISO installer: select an already-patched, filesystem-consistent US VCS ISO, choose only VCPR.VB, and select a NEW output ISO. Tick +3 dB to decode, boost and re-encode the VB before installing at AUDIO/MUSIC/VCPR.VB. Existing ELF/IRX fixes are preserved, not generated.')
+            self.game_inputs_help_var.set('VCS audio-only ISO installer: choose an already-patched, filesystem-consistent US ISO and a supported station VB or a folder of named station VBs. For a single VB with an arbitrary filename, choose its target station. The optional +3 dB checkbox applies to all selected station replacements. Existing EE/IRX fixes are preserved.')
 
     def _profile_changed(self, _event=None):
         if self.running:
@@ -980,23 +990,21 @@ class DurationPatcherGUI:
             messagebox.showerror('Could not patch VCS executable', str(exc))
 
     def _vcs_install_clicked(self):
-        """Build audio-only US VCS ISO, retaining all current EE/IRX seek fixes."""
+        """Audio-only US VCS ISO builder for any station or set of stations."""
         if self.profile_key != 'vcs_ps2' or self.running:
             return
         try:
             selected_text = self.radio_dir_var.get().strip()
-            selected = Path(selected_text) if selected_text else None
-            if selected is not None and selected.is_file():
-                # A single selected VB is explicitly assigned to VCPR by this
-                # dedicated installer, even when its source name is different.
-                if selected.suffix.lower() != '.vb':
-                    raise ValueError('The selected VCPR replacement must be a .VB file.')
-                replacement_vb = selected
-            else:
-                files = self._replacement_map()
-                if set(files) != {'VCPR.VB'}:
-                    raise ValueError('Choose a single .VB or a folder containing exactly VCPR.VB for the VCS installer.')
-                replacement_vb = files['VCPR.VB']
+            if not selected_text:
+                raise ValueError('Select a supported radio VB or a folder containing station .VB files.')
+            source = Path(selected_text)
+            if source.is_file() and source.suffix.lower() != '.vb':
+                raise ValueError('Single radio replacement must be a .VB file.')
+            override = None if self.single_station_var.get().startswith('Auto (') else self.single_station_var.get()
+            if source.is_dir() and override:
+                raise ValueError('Station selection override is for one VB only. Use named VB files for folders.')
+            from vcs_vb_gain_install import _get_replacements
+            station_map = _get_replacements(source, override)
             input_iso = Path(self.input_iso_var.get().strip())
             output_iso = Path(self.output_iso_var.get().strip())
             if not input_iso.is_file():
@@ -1009,39 +1017,38 @@ class DurationPatcherGUI:
             report = Path(report_value) if report_value else None
             if report and report.exists():
                 raise ValueError('Report already exists. Overwriting is disabled.')
-            boost = self.vcs_boost_3db_var.get()
+            boost = bool(self.boost_radio_3db_var.get())
         except Exception as exc:
             self._log('ERROR VCS audio ISO: ' + str(exc))
-            messagebox.showerror('VCS ISO inputs invalid',str(exc))
+            messagebox.showerror('VCS ISO inputs invalid', str(exc))
             return
-        msg = ('Create a NEW VCS ISO with AUDIO/MUSIC/VCPR.VB replaced?\n\n'
-               + ('OPTION ENABLED: decode and re-encode the selected VB at +3.0 dB.\n'
-                  if boost else 'OPTION OFF: insert the VB without changing its volume.\n')
-               + '\nThis AUDIO-ONLY operation preserves the ISO executable and CDSTREAM.IRX byte-for-byte. '
-                 'It does not add or repair seek, offsets or fade-in code. '
-                 'Use an input disc already containing your tested playback fixes. '
-                 'The earlier anomalous US ISO metadata will be rejected.\n\n'
-                 'No originals are overwritten. Proceed?')
-        if not messagebox.askyesno('VCS VCPR audio-only ISO installation',msg,icon='warning'):
+        names = ', '.join(sorted(station_map))
+        msg = (f'Create a NEW VCS ISO with {len(station_map)} radio station(s): {names}?\n\n'
+               + ('+3 dB ENABLED: decode, amplify and re-encode EACH selected VB.\n'
+                  if boost else 'Gain OFF: install audio unchanged.\n')
+               + '\nThis AUDIO-ONLY operation preserves the existing game executable, CDSTREAM.IRX '
+                 'and their seek/offset fixes. Use a disc already containing your tested fixes. '
+                 'Anomalous/overlapping ISO records are rejected.\n\n'
+                 'Originals are never overwritten. Proceed?')
+        if not messagebox.askyesno('VCS radio audio-only ISO installation', msg, icon='warning'):
             return
         self.running = True
         self.validation_var.set('VCS ISO building')
-        self.status_var.set('Preparing VCPR and copying input disc to a NEW ISO…')
+        self.status_var.set('Preparing station audio and building a NEW VCS ISO…')
         self.progress.start(10)
         self.profile_combo.configure(state='disabled')
         self.vcs_iso_install_button.configure(state='disabled')
-        self._log('VCS VCPR installer: +3dB checkbox = '+str(boost))
+        self._log(f'VCS installer {names}: +3dB = {boost}')
         def work():
             try:
-                from vcs_vb_gain_install import build_vcpr_audio_iso
-                result = build_vcpr_audio_iso(
-                    input_iso=input_iso,replacement_vb=replacement_vb,
-                    output_iso=output_iso,boost_vcpr_3db=boost,report_path=report,
-                    progress=lambda line:self.queue.put(('line',line)))
-                self.queue.put(('vcs_audio_done',result))
+                from vcs_vb_gain_install import build_radio_audio_iso
+                result = build_radio_audio_iso(input_iso=input_iso, replacement_vb=source,
+                    output_iso=output_iso, station=override, boost_radio_3db=boost,
+                    report_path=report, progress=lambda line:self.queue.put(('line',line)))
+                self.queue.put(('vcs_audio_done', result))
             except Exception as exc:
-                self.queue.put(('failed',str(exc)))
-        self.worker=threading.Thread(target=work,daemon=True)
+                self.queue.put(('failed', str(exc)))
+        self.worker = threading.Thread(target=work, daemon=True)
         self.worker.start()
 
     def _validate_clicked(self):
@@ -1103,6 +1110,16 @@ class DurationPatcherGUI:
         if existing and not messagebox.askyesno("Overwrite existing output?", "These output files already exist:\n\n" + "\n".join(existing) + "\n\nOverwrite them? The input ISO will remain unchanged."):
             return
         offset_mode = self._selected_offset_mode()
+        gain_enabled = bool(self.boost_radio_3db_var.get())
+        # Show exactly which radio replacements will receive gain; the full
+        # ten-station duration preview also contains untouched stock stations.
+        detected_station_names = []
+        if replacement_dir is not None:
+            sources = ([replacement_dir] if replacement_dir.is_file() else
+                       sorted((p for p in replacement_dir.iterdir() if p.is_file()), key=lambda p: p.name.upper()))
+            file_names = {p.name.upper() for p in sources}
+            detected_station_names = [name for _, name in patcher.STATIONS if name.upper() in file_names]
+        detected_summary = (', '.join(detected_station_names) if detected_station_names else '(none)')
         warning = (
             ("Combined mode: patches BOTH the EE executable and CDSTREAM.IRX in one ISO.\n\n" if offset_mode.startswith("iop-elf-") else ("IOP-only control: preserves the original ELF.\n\n" if offset_mode in ("native", "iop-safe-seek") else "Legacy experimental ELF-only patch.\n\n"))
             + "Any .VB station file and optional ENGLISH.GXT or GAME.DTZ companion in the replacement folder will be installed. Unlisted stations and companions stay as in the input ISO. "
@@ -1111,6 +1128,9 @@ class DurationPatcherGUI:
             f"Selected offset mode: {offset_mode}.\n{OFFSET_MODE_DESCRIPTIONS[offset_mode]}\n\n"
             + ("CAUTION: Adaptive mode adds an ELF segment just 52,888 bytes above the original program memory end. Unknown heap/buffer activity could overwrite the injected segment.\n\n" if offset_mode in ("shared", "station-specific", "iop-elf-shared", "iop-elf-station-specific") else "")
             + ("Station-specific mode also injects executable code and requires a fresh PCSX2 cold-boot test.\n\n" if offset_mode in ("station-specific", "iop-elf-station-specific") else "")
+            + (f"Detected {len(detected_station_names)} radio replacement(s): {detected_summary}.\n"
+               + ("+3 dB ENABLED for every detected replacement; untouched stations excluded. May clip.\n\n"
+                  if gain_enabled else "Gain disabled.\n\n"))
             + "Proceed and test only with a disposable ISO?"
         )
         if not messagebox.askyesno("Patch executable and build experimental ISO?", warning, icon="warning"):
@@ -1120,6 +1140,8 @@ class DurationPatcherGUI:
         self._log(f"Input executable (optional; original ISO used by default): {input_executable}")
         self._log(f"Output ISO: {output_iso}")
         self._log(f"Offset mode: {offset_mode}")
+        self._log(f"Detected radio replacements ({len(detected_station_names)}): {detected_summary}; "
+                  f"+3 dB to each = {gain_enabled}")
         self._log("Exact GUI preview values used to verify the selected installation mode:")
         for key, filename in patcher.STATIONS:
             metric = preview_metrics[key]
@@ -1144,6 +1166,7 @@ class DurationPatcherGUI:
                     executable_path=input_executable,
                     offset_mode=offset_mode,
                     expected_preview_metrics=preview_metrics,
+                    boost_radio_3db=gain_enabled,
                 )
                 self.queue.put(("done", result))
             except Exception as exc:
@@ -1172,6 +1195,9 @@ class DurationPatcherGUI:
                         self.status_var.set(f"Patched ISO written to {output}")
                         self._log(f"SUCCESS: Output ISO verified ({output.stat().st_size:,} bytes).")
                         self._log(f"ISO files updated: {len(result.get('iso_files_replaced', []))}")
+                        for name, gain in result.get('gain_by_station', {}).items():
+                            self._log(f'{name}: +3 dB requested, measured decoded RMS {gain["measured_decoded_rms_gain_db"]:.3f} dB; '
+                                      f'clipped target samples {gain["target_clipped_samples"]:,}/{gain["samples"]:,}')
                         offset_info = result.get("executable_patch_report", {}).get("offset_sequence_strategy", {})
                         chosen_mode = result.get("offset_mode", "unknown")
                         self._log(f"Offset mode applied: {chosen_mode}")
@@ -1247,19 +1273,18 @@ class DurationPatcherGUI:
                     self.profile_combo.configure(state='readonly')
                     self._apply_profile_controls()
                     result=item[1]
-                    self.validation_var.set('VCS VCPR ISO created')
+                    self.validation_var.set('VCS radio ISO created')
                     self.status_var.set('Audio-only ISO created; PCSX2 playback not verified')
-                    self._log('VCS ISO created: '+result['output_iso'])
-                    if result.get('gain'):
-                        gain=result['gain']
-                        self._log(f"+3 dB requested; measured decoded RMS gain {gain['measured_decoded_rms_gain_db']:.3f} dB")
-                        self._log(f"Clipped target samples: {gain['target_clipped_samples']:,} / {gain['samples']:,}")
-                    self._log('Original VCS executable and CDSTREAM.IRX were preserved and verified.')
+                    self._log('VCS ISO created: ' + result['output_iso'])
+                    for name, gain in result.get('gain_by_station', {}).items():
+                        self._log(f'{name}: +3 dB requested; measured RMS gain {gain["measured_decoded_rms_gain_db"]:.3f} dB')
+                        self._log(f'Clipped target samples: {gain["target_clipped_samples"]:,} / {gain["samples"]:,}')
+                    self._log('Original VCS executable and CDSTREAM.IRX preserved and verified.')
                     messagebox.showinfo('VCS audio ISO built',
-                        'New ISO created with AUDIO/MUSIC/VCPR.VB installed.\n\n'
-                        +result['output_iso']+'\n\n'
-                        +'Existing seek/offset code preserved. +3 dB does not change fade-in timing. '
-                         'Actual playback is not yet verified in PCSX2. See log for clipping results.')
+                        f'New ISO created with {len(result["iso_targets"])} station(s) installed.\n\n'
+                        + result['output_iso'] + '\n\n'
+                        + 'Existing seek/offset code preserved. +3 dB does not change fade-in timing. '
+                          'Actual playback is not yet verified in PCSX2.')
                 elif kind == "failed":
                     self.running = False
                     self.progress.stop()

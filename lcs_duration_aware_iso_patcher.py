@@ -780,6 +780,7 @@ def build_duration_aware_iso(
     offset_mode: Optional[str] = None,
     expected_preview_metrics: Optional[Dict[str, Dict[str, int]]] = None,
     strict_original_reference: bool = True,
+    boost_radio_3db: bool = False,
 ) -> dict:
     """Build an LCS ISO with independently selectable authenticated EE and IOP fixes.
 
@@ -858,6 +859,14 @@ def build_duration_aware_iso(
                     raise ValueError(f"Ambiguous case-insensitive duplicate filename: {candidate.name} and {replacement_lookup[upper_name].name}")
                 replacement_lookup[upper_name] = candidate
 
+    # Every recognized replacement is included, regardless of station count.
+    detected_replacements = [filename for _, filename in patcher.STATIONS
+                             if filename.upper() in replacement_lookup]
+    if progress:
+        progress(f'LCS detected {len(detected_replacements)} replacement radio(s): '
+                 + (', '.join(detected_replacements) if detected_replacements else '(none)')
+                 + ('; optional +3 dB will be applied to each.' if boost_radio_3db else '; gain disabled.'))
+
     # One calculator derives all 10 EE boundary values and both IOP opcodes
     # directly from the incoming bytes + authentic stock ISO reference sizes.
     original_sizes = {key: station_records[key].size for key, _ in patcher.STATIONS}
@@ -896,6 +905,7 @@ def build_duration_aware_iso(
         station_sources: Dict[str, dict] = {}
         iso_replacements: Dict[str, Path] = {}
         vb_audio_structure_reports: Dict[str, dict] = {}
+        radio_gain_reports: Dict[str, dict] = {}
         optional_radio_assets: List[dict] = []
         # No new GUI steps or prompts: recognized companions in the selected
         # VB folder are installed automatically, byte-for-byte. Both files
@@ -925,11 +935,19 @@ def build_duration_aware_iso(
                 original_size, _ = patcher.duration_ms_from_raw_stereo_psx_adpcm(replacement)
                 diagnostic = audit_vb(replacement, full_scan=True)
                 vb_audio_structure_reports[key] = diagnostic
-                stage_path = replacement
+                audio_source = replacement
+                if boost_radio_3db:
+                    from radio_vb_gain import boost_vb
+                    boosted_path = stage_dir / f'{key}.plus3db.VB'
+                    radio_gain_reports[filename] = boost_vb(replacement, boosted_path, progress)
+                    audio_source = boosted_path
+                    # Verify the re-encoded audio before it can reach the ISO.
+                    vb_audio_structure_reports[key]['boosted_audit'] = audit_vb(audio_source, full_scan=True)
+                stage_path = audio_source
                 pad = None
                 if original_size < READ_CHUNK_BYTES:
                     stage_path = stage_dir / filename
-                    pad = stage_audio_with_short_stream_guard(replacement, stage_path)
+                    pad = stage_audio_with_short_stream_guard(audio_source, stage_path)
                     # Also validate the exact installed padded stream.
                     padded_audit = audit_vb(stage_path, full_scan=True)
                     vb_audio_structure_reports[key]['installed_padded_audit'] = padded_audit
@@ -1184,6 +1202,10 @@ def build_duration_aware_iso(
             "source_executable_sha256": source_executable_sha256,
             "iop_cdstream_module_structure_audit": iop_module_report,
             "replacement_vb_adpcm_structure_audit": vb_audio_structure_reports,
+            "boost_radio_3db": bool(boost_radio_3db),
+            "detected_replacement_stations": detected_replacements,
+            "boosted_replacement_stations": sorted(radio_gain_reports),
+            "gain_by_station": radio_gain_reports,
             "automatically_installed_radio_companion_assets": [
                 {**asset, "verified_output_sha256": next(
                     item["source_sha256"] for item in iso_write_report
