@@ -130,6 +130,19 @@ class VCSPS2Backend:
             raise ValueError(f'Unknown VCS station keys: {sorted(unknown)}')
         return patch_file(Path(pristine_executable), Path(new_executable), list(replacements.values()))
 
+    def patch_executable_with_adaptive_offsets(self, executable: Path, new_executable: Path,
+                                               replacement_sizes: Mapping[str, int]) -> dict:
+        """VCS-only opt-in shared ~5-second offsets plus EE DIVU fixes.
+
+        Accepts exactly authenticated original or two-DIVU-only ELF; refuses
+        every other patched variant, preserving unrecognized user changes.
+        """
+        from vcs_adaptive_offsets import patch_file
+        unknown = set(replacement_sizes) - {name for name, _ in self.profile.stations}
+        if unknown:
+            raise ValueError(f'Unknown VCS station keys: {sorted(unknown)}')
+        return patch_file(Path(executable), Path(new_executable), replacement_sizes)
+
     def patch_cdstream_position_overflow_only(self, pristine_irx: Path, new_irx: Path,
                                               replacement_sizes: Mapping[str, int] | None = None) -> dict:
         """VCS-only experimental signed IOP position arithmetic correction.

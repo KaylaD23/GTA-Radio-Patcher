@@ -1,9 +1,9 @@
-"""VCS PS2 optional +3 dB VCPR.VB re-encode and audio-only ISO installation.
+"""VCS PS2 ISO installer: any station VB, optional +3 dB and experimental offsets.
 
-No EE, IOP or adaptive-offset opcode editing. It explicitly preserves all
-existing executable and streaming module bytes, so it requires that the input
-ISO already contains whichever verified radio playback fixes the user needs.
-Uses only the ISO9660 filesystem *format* writer shared with LCS.
+By default all executable and IOP code is preserved. The explicitly enabled
+adaptive-offset mode replaces ONLY a strictly recognized original or EE DIVU-
+only US VCS executable; unknown patches fail closed. Uses ISO9660 filesystem
+format tooling shared with LCS, never LCS game-specific opcode patching.
 """
 from __future__ import annotations
 
@@ -89,11 +89,14 @@ def _get_replacements(source: Path, station: str | None = None) -> dict[str, Pat
 def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
                           output_iso: Path, boost_radio_3db: bool = False,
                           station: str | None = None,
+                          expand_vcs_offsets: bool = False,
                           progress: Progress = None, report_path: Path | None = None) -> dict:
     """Create a NEW VCS USA ISO with any selected radio station(s) replaced.
 
-    An existing patched EE/IOP/offset executable/module is copied unchanged;
-    this action does not create seek/duration/offset fixes.
+    By default, preserve the input ELF/IRX. Opt-in VCS offsets require an
+    authenticated original or the exact known two-DIVU-only executable; other
+    EE variants are rejected to avoid silently erasing existing user patches.
+    The IOP module is always preserved. The VCS PT_LOAD addition is experimental.
     """
     input_iso, replacement_vb, output_iso = map(Path, (input_iso, replacement_vb, output_iso))
     files = [input_iso, replacement_vb, output_iso]
@@ -121,18 +124,34 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
     destinations = {'AUDIO/MUSIC/' + name: path for name, path in replacements.items()}
     for iso_path in destinations:
         original.get(iso_path)  # fail before transcoding if the ISO lacks the destination
-    original_exe_sha = hashlib.sha256(original.read_entry_bytes(EXPECTED_BOOT)).hexdigest()
+    original_exe_bytes = original.read_entry_bytes(EXPECTED_BOOT)
+    original_exe_sha = hashlib.sha256(original_exe_bytes).hexdigest()
     original_irx_sha = hashlib.sha256(original.read_entry_bytes('MODULES/CDSTREAM.IRX')).hexdigest()
     gain_reports = {}
+    offset_report = None
+    expected_exe_sha = original_exe_sha
     with tempfile.TemporaryDirectory(prefix='gta_vcs_radio_') as tmp:
         staging = Path(tmp)
+        if expand_vcs_offsets:
+            from vcs_adaptive_offsets import build_executable
+            from gta_radio_profiles import get_profile
+            file_keys = {name: key for key, name in get_profile('vcs_ps2').stations}
+            selected_sizes = {file_keys[name]: size for name, size in sizes.items()}
+            patched_ee, offset_report = build_executable(original_exe_bytes, selected_sizes)
+            expected_exe_sha = hashlib.sha256(patched_ee).hexdigest()
+            elf_stage = staging / EXPECTED_BOOT
+            elf_stage.write_bytes(patched_ee)
+            destinations[EXPECTED_BOOT] = elf_stage
+            if progress:
+                progress(f"VCS EXPERIMENTAL: including {offset_report['offsets']['table_count']} shared offsets "
+                         f"in new ELF PT_LOAD (runtime heap safety unverified)")
         if boost_radio_3db:
             for name, src in replacements.items():
                 dst = staging / name
                 gain_reports[name] = boost_vb(src, dst, progress)
                 destinations['AUDIO/MUSIC/' + name] = dst
         def post_verify(image):
-            if hashlib.sha256(image.read_entry_bytes(EXPECTED_BOOT)).hexdigest() != original_exe_sha:
+            if hashlib.sha256(image.read_entry_bytes(EXPECTED_BOOT)).hexdigest() != expected_exe_sha:
                 raise IOError('Original/patched VCS executable changed unexpectedly')
             if hashlib.sha256(image.read_entry_bytes('MODULES/CDSTREAM.IRX')).hexdigest() != original_irx_sha:
                 raise IOError('Original/patched VCS streaming module changed unexpectedly')
@@ -140,19 +159,27 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
                 if image.get('AUDIO/MUSIC/' + name).size != size:
                     raise IOError(name + ': incorrect ISO replacement length')
         if progress:
-            progress(f'Installing {len(replacements)} VCS station(s); retaining existing EE/IOP patches…')
+            progress(f'Installing {len(replacements)} VCS station(s); ' +
+                     ('including experimental new offset ELF; preserving IOP…' if expand_vcs_offsets
+                      else 'retaining existing EE/IOP patches…'))
         installed = apply_iso_replacements(input_iso, output_iso, destinations, progress, post_verify)
     result = {
-        'profile':'vcs_ps2', 'purpose':'Any-station audio-only VCS ISO installation',
+        'profile':'vcs_ps2', 'purpose':'Any-station VCS ISO installation (optional experimental offset EE)',
         'input_iso':str(input_iso), 'output_iso':str(output_iso),
         'iso_targets':sorted(destinations), 'vb_input_bytes':sizes,
         'boost_radio_3db':bool(boost_radio_3db),
         'detected_replacement_stations':sorted(replacements),
         'boosted_replacement_stations':sorted(gain_reports),
         'gain_by_station':gain_reports,
-        'installed':installed, 'executable_preserved_sha256':original_exe_sha,
+        'installed':installed, 'executable_input_sha256':original_exe_sha,
+        'executable_output_sha256':expected_exe_sha,
+        'executable_preserved_sha256':(original_exe_sha if not expand_vcs_offsets else None),
+        'experimental_vcs_adaptive_offsets':bool(expand_vcs_offsets),
+        'offset_patch_report':offset_report,
         'cdstream_preserved_sha256':original_irx_sha, 'gameplay_verified':False,
-        'notice':'EE, IOP and random-offset patch code is preserved but not added. +3 dB does not fix fade-in timing.'
+        'notice':('Experimental VCS shared offset ELF injected; runtime heap/loader safety unverified, IOP preserved.'
+                  if expand_vcs_offsets else 'EE, IOP and random-offset patch code preserved but not added.')
+                 + ' +3 dB does not fix fade-in timing.'
     }
     if len(replacements) == 1:
         name = next(iter(replacements))
@@ -183,10 +210,13 @@ def main():
     parser.add_argument('--station', help='Target station for a single .VB with any filename')
     parser.add_argument('--output-iso', required=True, type=Path)
     parser.add_argument('--boost-3db', action='store_true')
+    parser.add_argument('--experimental-vcs-offsets', action='store_true',
+                        help='Opt-in ~5-second shared offset ELF patch (known original/DIVU only). Runtime unverified.')
     parser.add_argument('--report', type=Path)
     ns = parser.parse_args()
     print(json.dumps(build_radio_audio_iso(input_iso=ns.input_iso, replacement_vb=ns.source,
         output_iso=ns.output_iso, station=ns.station, boost_radio_3db=ns.boost_3db,
+        expand_vcs_offsets=ns.experimental_vcs_offsets,
         report_path=ns.report, progress=lambda line: print(line, file=sys.stderr, flush=True)), indent=2))
 
 if __name__ == '__main__':
