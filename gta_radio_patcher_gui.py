@@ -37,6 +37,16 @@ OFFSET_MODE_LABELS = {
     "Shared adaptive offsets (all radios)": "shared",
     "Station-specific adaptive offsets": "station-specific",
 }
+# Both games use the SAME existing mode dropdown. VCS currently has only a
+# verified-to-build stock/preserve option and an EXPERIMENTAL shared table;
+# do not offer an unimplemented VCS station-specific mode.
+VCS_OFFSET_MODE_LABELS = {
+    "VCS: Original offsets (preserve existing executable)": "vcs-stock",
+    "VCS: Shared adaptive offsets (~5-second spacing; EXPERIMENTAL)": "vcs-shared",
+}
+DEFAULT_LCS_OFFSET_LABEL = "Combined: IOP safe seeks + patched ELF (shared adaptive offsets)"
+DEFAULT_VCS_OFFSET_LABEL = next(iter(VCS_OFFSET_MODE_LABELS))
+
 OFFSET_MODE_DESCRIPTIONS = {
     "iop-elf-stock": "Combined: calculate the original ELF's ten durations plus IOP seek, position and duration overflow changes from the installed audio sizes. Extremely short streams are padded to 256 KiB. Stock offsets preserved. Actual gameplay unverified.",
     "iop-elf-shared": "Combined: modified ELF with shared adaptive offsets + conditional IOP safe seeks; streams below 256 KiB padded. Injected ELF segment may conflict with game heap at runtime.",
@@ -46,6 +56,8 @@ OFFSET_MODE_DESCRIPTIONS = {
     "shared": "One duration-scaled shared sequence, using an extra ELF PT_LOAD near original game memory; heap-clobber risk is unverified. Experimental; compare against stock mode.",
     "station-specific": "Each station gets its own duration-scaled golden-stride sequence and independent cursor. Experimental MIPS helper/RWX ELF segment; test in PCSX2.",
     "stock": "Experimental ELF duration override with the stock random-offset table preserved. The original IOP already supplies native duration: prefer Native IOP mode unless comparing behavior.",
+    "vcs-stock": "VCS: keep the stock offset policy and preserve the input ISO executable and CDSTREAM.IRX during ISO installation. Standalone ELF button still applies/preserves its two known EE DIVU overflow corrections.",
+    "vcs-shared": "VCS EXPERIMENTAL: inject a 5-second-distribution shared offset table into the executable. Only original or known DIVU-only VCS EE accepted. CDSTREAM.IRX is preserved. New ELF PT_LOAD at 0x00780000 may conflict with runtime heap; PCSX2 safety and repeat reduction unverified.",
 }
 
 
@@ -72,7 +84,7 @@ class DurationPatcherGUI:
         self.input_exe_var = tk.StringVar()
         self.input_vcs_irx_var = tk.StringVar()
         self.boost_radio_3db_var = tk.BooleanVar(value=False)
-        self.vcs_adaptive_offsets_var = tk.BooleanVar(value=False)
+        self.radio_gain_db_var = tk.StringVar(value="3.0")
         self.vcs_boost_3db_var = self.boost_radio_3db_var  # compatibility with older GUI scripts
         self.single_station_var = tk.StringVar(value='Auto (from .VB filename)')
         self.radio_dir_var = tk.StringVar()
@@ -80,7 +92,11 @@ class DurationPatcherGUI:
         self.report_var = tk.StringVar()
         # Default to full combined EE+IOP and high-count adaptive offsets.
         # Comparison-only modes remain available explicitly; none is gameplay-certified.
-        self.offset_mode_var = tk.StringVar(value="Combined: IOP safe seeks + patched ELF (shared adaptive offsets)")
+        self._offset_labels_by_profile = {
+            'lcs_ps2': DEFAULT_LCS_OFFSET_LABEL,
+            'vcs_ps2': DEFAULT_VCS_OFFSET_LABEL,
+        }
+        self.offset_mode_var = tk.StringVar(value=DEFAULT_LCS_OFFSET_LABEL)
         self.offset_mode_help_var = tk.StringVar(value=OFFSET_MODE_DESCRIPTIONS["iop-elf-shared"])
         self.report_custom = False
         self.output_custom = False
@@ -224,23 +240,23 @@ class DurationPatcherGUI:
             state='readonly', width=37)
         self.single_station_combo.grid(row=10, column=1, sticky="w", pady=(6,0))
         self.radio_gain_checkbox = ttk.Checkbutton(
-            inputs, text="Boost ALL detected replacement radios by +3 dB (LCS & VCS)",
+            inputs, text="Boost ALL detected replacement radios (LCS & VCS)",
             variable=self.boost_radio_3db_var, style="Card.TCheckbutton")
-        self.radio_gain_checkbox.grid(row=11, column=0, columnspan=3, sticky="w", pady=(9,0))
+        self.radio_gain_checkbox.grid(row=11, column=0, sticky="w", pady=(9,0))
         self.vcs_gain_checkbox = self.radio_gain_checkbox  # compatibility alias
-        self.vcs_offset_checkbox = ttk.Checkbutton(
-            inputs, text="VCS EXPERIMENTAL: expand shared radio offsets (~5-second spacing)",
-            variable=self.vcs_adaptive_offsets_var, style="Card.TCheckbutton",
-            command=self._vcs_offset_checkbox_changed)
-        self.vcs_offset_checkbox.grid(row=13, column=0, columnspan=3, sticky="w", pady=(8, 0))
-        ttk.Label(inputs, text="VCS standalone ELF only: ~5-second offset contributions, not guaranteed song/start spacing. "
-                  "A second PT_LOAD at 0x00780000 is NOT verified safe from the game heap; test in a disposable ISO. "
-                  "Leaves existing CDSTREAM.IRX unchanged; supports only the original or known two-DIVU VCS executable.",
-                  style="Card.TLabel", foreground="#ffd38d", wraplength=1100).grid(
-                      row=14, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        gain_field = ttk.Frame(inputs, style="Card.TFrame")
+        gain_field.grid(row=11, column=1, columnspan=2, sticky="w", pady=(9,0))
+        ttk.Label(gain_field, text="Increase by", style="Card.TLabel").pack(side="left", padx=(4,7))
+        self.radio_gain_spinbox = ttk.Spinbox(
+            gain_field, from_=0.1, to=3.0, increment=0.1, width=7,
+            textvariable=self.radio_gain_db_var, state="disabled")
+        self.radio_gain_spinbox.pack(side="left")
+        ttk.Label(gain_field, text="dB (0.1 to 3.0)", style="Card.TLabel").pack(side="left", padx=(7,0))
+        self.boost_radio_3db_var.trace_add('write', lambda *_: self._sync_gain_control())
         ttk.Label(inputs,
-            text="Optional: re-encode each replacement .VB at +3 dB before the ISO build. Unselected stations are unchanged. "
-                 "Clipping is possible; this does not change the game's fade-in timing. Windows: local C++17 compiler required.",
+            text="Optional: select +0.1 to +3.0 dB gain for every detected replacement .VB. "
+                 "Smaller gain reduces clipping risk but does not guarantee no clipping or change fade-in timing. "
+                 "Unselected stations remain unchanged; Windows requires a local C++17 compiler.",
             style="Card.TLabel", foreground="#b9c9d4", wraplength=1100).grid(
                 row=12, column=0, columnspan=3, sticky="w", pady=(2,0))
         inputs.columnconfigure(1, weight=1)
@@ -319,8 +335,15 @@ class DurationPatcherGUI:
         if not self.running:
             self._refresh_audio_preview()
 
-    def _vcs_offset_checkbox_changed(self):
-        enabled = bool(self.vcs_adaptive_offsets_var.get())
+    def _vcs_offsets_selected(self) -> bool:
+        """Interpret the existing Offset mode dropdown for the VCS profile."""
+        mode = self._selected_offset_mode()
+        if mode not in VCS_OFFSET_MODE_LABELS.values():
+            raise ValueError('Select a supported VCS offset mode from the dropdown')
+        return mode == 'vcs-shared'
+
+    def _update_vcs_offset_actions(self):
+        enabled = self._vcs_offsets_selected() if self.profile_key == 'vcs_ps2' else False
         self.vcs_exe_fix_button.configure(text=(
             "PATCH VCS EXECUTABLE (EE + ADAPTIVE OFFSETS · EXPERIMENTAL)" if enabled
             else "PATCH VCS EXECUTABLE (OVERFLOW ONLY)"))
@@ -335,23 +358,36 @@ class DurationPatcherGUI:
             return
         self.profile_summary_var.set(profile.description)
         self.profile_status_var.set('ISO patch writer available (experimental)' if profile.can_build
-                                    else 'VCS ISO radio installer · optional experimental shared offsets; IOP preserved')
+                                    else 'VCS ISO radio installer · offset mode in dropdown; IOP preserved')
         self.validate_button.configure(text='Validate inputs' if profile.can_build else 'Analyze VCS files', state='normal')
         self.run_button.configure(state='normal' if profile.can_build and patcher and iso_patcher else 'disabled')
-        self.offset_mode_combo.configure(state='readonly' if profile.can_build else 'disabled')
+        modes = OFFSET_MODE_LABELS if profile.can_build else VCS_OFFSET_MODE_LABELS
+        self.offset_mode_combo.configure(values=tuple(modes), state='readonly')
+        if self.offset_mode_var.get() not in modes:
+            self.offset_mode_var.set(self._offset_labels_by_profile[self.profile_key])
         self.vcs_exe_fix_button.configure(state='normal' if self.profile_key == 'vcs_ps2' else 'disabled')
         self.vcs_irx_fix_button.configure(state='normal' if self.profile_key == 'vcs_ps2' else 'disabled')
         self.vcs_iso_install_button.configure(state='normal' if self.profile_key == 'vcs_ps2' else 'disabled')
-        self.vcs_offset_checkbox.configure(state='normal' if self.profile_key == 'vcs_ps2' else 'disabled')
-        self._vcs_offset_checkbox_changed()
+        self._offset_mode_changed()
         self.radio_gain_checkbox.configure(state='normal')
+        self._sync_gain_control()
         self.single_station_combo.configure(state='readonly' if self.profile_key == 'vcs_ps2' else 'disabled')
         if profile.can_build:
             self.game_warning_var.set('LCS PS2: experimental ELF and CDSTREAM.IRX patches; original source required. PCSX2 gameplay remains unverified.')
             self.game_inputs_help_var.set('LCS profile: SLUS_214.23 and original MODULES/CDSTREAM.IRX; ten radio .VB streams. Optional ENGLISH.GXT / GAME.DTZ in the VB folder are included automatically. Originals are never overwritten.')
         else:
             self.game_warning_var.set('VCS PS2 target: 1 sec–4h39m per station. Exact-revision EE DIVU fix covers aligned streams to 4:39:37.152; IOP signed positions have an experimental MIPS fix; loader behaviour, EOF and ISO building remain unverified.')
-            self.game_inputs_help_var.set('VCS ISO installer: choose a filesystem-consistent US ISO and one or more station VBs. Optional +3 dB affects every detected replacement. The NEW EXPERIMENTAL offset checkbox patches the game executable only when it is original or exactly EE-DIVU-only; any other pre-existing executable changes are refused. CDSTREAM.IRX is always preserved.')
+            self.game_inputs_help_var.set('VCS ISO installer: choose a filesystem-consistent US ISO and one or more station VBs. Optional adjustable +0.1 to +3.0 dB gain affects every detected replacement. The shared adaptive OFFSET DROPDOWN mode patches the game executable only when it is original or exactly EE-DIVU-only; any other pre-existing executable changes are refused. CDSTREAM.IRX is always preserved.')
+
+    def _sync_gain_control(self):
+        self.radio_gain_spinbox.configure(
+            state="normal" if self.boost_radio_3db_var.get() and not self.running else "disabled")
+
+    def _selected_gain_db(self):
+        if not self.boost_radio_3db_var.get():
+            return 0.0
+        from radio_vb_gain import validate_gain_db
+        return validate_gain_db(self.radio_gain_db_var.get().strip())
 
     def _profile_changed(self, _event=None):
         if self.running:
@@ -367,6 +403,8 @@ class DurationPatcherGUI:
             self.output_iso_var.get(), self.report_var.get(), self.input_vcs_irx_var.get(),
             self.output_custom, self.report_custom,
         )
+        # Remember different mode selections for LCS and VCS when switching games.
+        self._offset_labels_by_profile[self.profile_key] = self.offset_mode_var.get()
         self._changing_profile = True
         try:
             self.profile_key = target.key
@@ -377,6 +415,7 @@ class DurationPatcherGUI:
                                   (iso, exe, audio, output, report, irx)):
                 var.set(value)
             self.output_custom, self.report_custom = out_custom, rep_custom
+            self.offset_mode_var.set(self._offset_labels_by_profile[target.key])
         finally:
             self._changing_profile = False
         self._invalidate_iso_cache()
@@ -498,17 +537,18 @@ class DurationPatcherGUI:
 
     def _selected_offset_mode(self) -> str:
         label = self.offset_mode_var.get()
+        modes = VCS_OFFSET_MODE_LABELS if self.profile_key == 'vcs_ps2' else OFFSET_MODE_LABELS
         try:
-            return OFFSET_MODE_LABELS[label]
+            return modes[label]
         except KeyError as exc:
-            raise ValueError(f"Unknown offset mode: {label}") from exc
+            raise ValueError(f"Unknown {self.profile_key} offset mode: {label}") from exc
 
     def _offset_mode_changed(self, _event=None):
-        if self.profile_key != 'lcs_ps2':
-            return
         mode = self._selected_offset_mode()
         self.offset_mode_help_var.set(OFFSET_MODE_DESCRIPTIONS[mode])
-        if not self.running:
+        if self.profile_key == 'vcs_ps2':
+            self._update_vcs_offset_actions()
+        elif not self.running:
             self._refresh_audio_preview()
 
     def _populate_empty_rows(self):
@@ -989,7 +1029,7 @@ class DurationPatcherGUI:
                 sizes = {names[name]: path.stat().st_size for name, path in selections.items()}
             if sizes:
                 validate_radio_sizes(list(sizes.values()))
-            if self.vcs_adaptive_offsets_var.get() and not sizes:
+            if self._vcs_offsets_selected() and not sizes:
                 raise ValueError('VCS adaptive offsets require at least one selected station VB file')
         except Exception as exc:
             messagebox.showerror('VCS overflow-fix input rejected', str(exc))
@@ -997,14 +1037,14 @@ class DurationPatcherGUI:
             return
         output = filedialog.asksaveasfilename(
             title=('Save NEW VCS executable with experimental adaptive offsets'
-                   if self.vcs_adaptive_offsets_var.get() else 'Save NEW overflow-corrected VCS executable (not ISO)'),
+                   if self._vcs_offsets_selected() else 'Save NEW overflow-corrected VCS executable (not ISO)'),
             initialfile=('SLUS_215.90.offsets_experimental'
-                         if self.vcs_adaptive_offsets_var.get() else 'SLUS_215.90.overflow_fixed'),
+                         if self._vcs_offsets_selected() else 'SLUS_215.90.overflow_fixed'),
             filetypes=[('PS2 executable', '*.elf *.ELF *.90 *.*'), ('All files', '*.*')])
         if not output:
             return
         try:
-            if self.vcs_adaptive_offsets_var.get():
+            if self._vcs_offsets_selected():
                 result = get_backend('vcs_ps2').patch_executable_with_adaptive_offsets(
                     Path(source_text), Path(output), sizes)
                 info = result['offsets']
@@ -1068,14 +1108,16 @@ class DurationPatcherGUI:
             if report and report.exists():
                 raise ValueError('Report already exists. Overwriting is disabled.')
             boost = bool(self.boost_radio_3db_var.get())
-            expand_vcs_offsets = bool(self.vcs_adaptive_offsets_var.get())
+            gain_db = self._selected_gain_db()
+            offset_mode = self._selected_offset_mode()
+            expand_vcs_offsets = bool(self._vcs_offsets_selected())
         except Exception as exc:
             self._log('ERROR VCS audio ISO: ' + str(exc))
             messagebox.showerror('VCS ISO inputs invalid', str(exc))
             return
         names = ', '.join(sorted(station_map))
         msg = (f'Create a NEW VCS ISO with {len(station_map)} radio station(s): {names}?\n\n'
-               + ('+3 dB ENABLED: decode, amplify and re-encode EACH selected VB.\n'
+               + (f'+{gain_db:g} dB ENABLED: decode, amplify and re-encode EACH selected VB.\n'
                   if boost else 'Gain OFF: install audio unchanged.\n')
                + ('\nEXPERIMENTAL VCS OFFSET ELF ENABLED: adds new ELF segment; only recognized '
                   'original or DIVU-only executable is permitted, unknown EE patches are REJECTED. '
@@ -1091,13 +1133,13 @@ class DurationPatcherGUI:
         self.progress.start(10)
         self.profile_combo.configure(state='disabled')
         self.vcs_iso_install_button.configure(state='disabled')
-        self._log(f'VCS installer {names}: +3dB = {boost}; experimental offsets = {expand_vcs_offsets}')
+        self._log(f'VCS installer {names}: offset mode = {offset_mode}; gain enabled = {boost}; gain = {gain_db:g} dB')
         def work():
             try:
                 from vcs_vb_gain_install import build_radio_audio_iso
                 result = build_radio_audio_iso(input_iso=input_iso, replacement_vb=source,
-                    output_iso=output_iso, station=override, boost_radio_3db=boost,
-                    expand_vcs_offsets=expand_vcs_offsets,
+                    output_iso=output_iso, station=override, boost_radio_3db=boost, gain_db=gain_db,
+                    expand_vcs_offsets=expand_vcs_offsets, offset_mode=offset_mode,
                     report_path=report, progress=lambda line:self.queue.put(('line',line)))
                 self.queue.put(('vcs_audio_done', result))
             except Exception as exc:
@@ -1165,6 +1207,11 @@ class DurationPatcherGUI:
             return
         offset_mode = self._selected_offset_mode()
         gain_enabled = bool(self.boost_radio_3db_var.get())
+        try:
+            gain_db = self._selected_gain_db()
+        except ValueError as exc:
+            messagebox.showerror('Invalid gain setting', str(exc))
+            return
         # Show exactly which radio replacements will receive gain; the full
         # ten-station duration preview also contains untouched stock stations.
         detected_station_names = []
@@ -1183,7 +1230,7 @@ class DurationPatcherGUI:
             + ("CAUTION: Adaptive mode adds an ELF segment just 52,888 bytes above the original program memory end. Unknown heap/buffer activity could overwrite the injected segment.\n\n" if offset_mode in ("shared", "station-specific", "iop-elf-shared", "iop-elf-station-specific") else "")
             + ("Station-specific mode also injects executable code and requires a fresh PCSX2 cold-boot test.\n\n" if offset_mode in ("station-specific", "iop-elf-station-specific") else "")
             + (f"Detected {len(detected_station_names)} radio replacement(s): {detected_summary}.\n"
-               + ("+3 dB ENABLED for every detected replacement; untouched stations excluded. May clip.\n\n"
+               + (f"+{gain_db:g} dB ENABLED for every detected replacement; untouched stations excluded. May clip.\n\n"
                   if gain_enabled else "Gain disabled.\n\n"))
             + "Proceed and test only with a disposable ISO?"
         )
@@ -1195,7 +1242,7 @@ class DurationPatcherGUI:
         self._log(f"Output ISO: {output_iso}")
         self._log(f"Offset mode: {offset_mode}")
         self._log(f"Detected radio replacements ({len(detected_station_names)}): {detected_summary}; "
-                  f"+3 dB to each = {gain_enabled}")
+                  f"gain to each = {gain_enabled}; target +{gain_db:g} dB")
         self._log("Exact GUI preview values used to verify the selected installation mode:")
         for key, filename in patcher.STATIONS:
             metric = preview_metrics[key]
@@ -1220,7 +1267,7 @@ class DurationPatcherGUI:
                     executable_path=input_executable,
                     offset_mode=offset_mode,
                     expected_preview_metrics=preview_metrics,
-                    boost_radio_3db=gain_enabled,
+                    boost_radio_3db=gain_enabled, gain_db=gain_db,
                 )
                 self.queue.put(("done", result))
             except Exception as exc:
@@ -1250,7 +1297,7 @@ class DurationPatcherGUI:
                         self._log(f"SUCCESS: Output ISO verified ({output.stat().st_size:,} bytes).")
                         self._log(f"ISO files updated: {len(result.get('iso_files_replaced', []))}")
                         for name, gain in result.get('gain_by_station', {}).items():
-                            self._log(f'{name}: +3 dB requested, measured decoded RMS {gain["measured_decoded_rms_gain_db"]:.3f} dB; '
+                            self._log(f'{name}: +{gain["requested_gain_db"]:g} dB requested, measured decoded RMS {gain["measured_decoded_rms_gain_db"]:.3f} dB; '
                                       f'clipped target samples {gain["target_clipped_samples"]:,}/{gain["samples"]:,}')
                         offset_info = result.get("executable_patch_report", {}).get("offset_sequence_strategy", {})
                         chosen_mode = result.get("offset_mode", "unknown")
@@ -1305,6 +1352,11 @@ class DurationPatcherGUI:
                             self._log("STREAM WARNING: " + stream_warning)
                         if chosen_mode in ("shared", "station-specific", "iop-elf-shared", "iop-elf-station-specific"):
                             self._log("MEMORY WARNING: additional PT_LOAD is only 52,888 bytes above original executable memory end; runtime heap collision has not been excluded.")
+                        gain_clip_stations = [name for name, details in result.get('gain_by_station', {}).items()
+                                              if details.get('target_clipped_samples', 0)]
+                        if gain_clip_stations:
+                            self._log(f'AUDIO CLIPPING WARNING: +{result.get("gain_db", 3):g} dB exceeds full scale for ' +
+                                      ', '.join(gain_clip_stations) + '; actual RMS gain may be less than the target.')
                         report_warning = result.get("report_write_error")
                         if report_warning:
                             self._log("WARNING: " + report_warning)
@@ -1315,6 +1367,8 @@ class DurationPatcherGUI:
                             f"Patched ISO created and its replaced payloads were verified:\n\n{output}\n\n"
                             + (f"JSON report:\n{report}\n\n" if report and not report_warning else "")
                             + (f"WARNING: {report_warning}\n\n" if report_warning else "")
+                            + (f"AUDIO CLIPPING WARNING: the +{result.get('gain_db', 3):g} dB target exceeds full scale for: "
+                               + ', '.join(gain_clip_stations) + "\n\n" if gain_clip_stations else "")
                             + "This confirms static ISO construction, not game/emulator compatibility.",
                         )
                     else:
@@ -1331,9 +1385,17 @@ class DurationPatcherGUI:
                     self.status_var.set(('Experimental adaptive-offset ISO created' if result.get('experimental_vcs_adaptive_offsets') else 'Audio-only ISO created') + '; PCSX2 playback not verified')
                     self._log('VCS ISO created: ' + result['output_iso'])
                     for name, gain in result.get('gain_by_station', {}).items():
-                        self._log(f'{name}: +3 dB requested; measured RMS gain {gain["measured_decoded_rms_gain_db"]:.3f} dB')
+                        self._log(f'{name}: +{gain["requested_gain_db"]:g} dB requested; measured RMS gain {gain["measured_decoded_rms_gain_db"]:.3f} dB')
                         self._log(f'Clipped target samples: {gain["target_clipped_samples"]:,} / {gain["samples"]:,}')
+                    vcs_clipped_stations = [name for name, details in result.get('gain_by_station', {}).items()
+                                            if details.get('target_clipped_samples', 0)]
+                    if vcs_clipped_stations:
+                        self._log(f'AUDIO CLIPPING WARNING: +{result.get("gain_db", 3):g} dB exceeds full scale for ' +
+                                  ', '.join(vcs_clipped_stations) + '; actual RMS gain may be less than the target.')
                     self._log('Original VCS CDSTREAM.IRX preserved and verified.')
+                    vcs_report_warning = result.get('report_write_error')
+                    if vcs_report_warning:
+                        self._log('WARNING: ' + vcs_report_warning)
                     if result.get('experimental_vcs_adaptive_offsets'):
                         self._log(f"Expanded VCS EE random-offset table: {result['offset_patch_report']['offsets']['table_count']} values (loader/heap unverified).")
                     else:
@@ -1343,8 +1405,11 @@ class DurationPatcherGUI:
                         + result['output_iso'] + '\n\n'
                         + ('EXPERIMENTAL offset ELF included: runtime heap/loader safety and repeat reduction NOT verified. '
                            if result.get('experimental_vcs_adaptive_offsets') else 'Existing EE and IRX preserved. ')
-                        + 'CDSTREAM.IRX preserved. +3 dB does not change fade-in timing. '
-                          'Actual playback is not yet verified in PCSX2.')
+                        + 'CDSTREAM.IRX preserved. Gain does not change fade-in timing. '
+                          'Actual playback is not yet verified in PCSX2.'
+                        + ('\n\nWARNING: ' + vcs_report_warning if vcs_report_warning else '')
+                        + (f'\n\nAUDIO CLIPPING WARNING: +{result.get("gain_db", 3):g} dB exceeds full scale for '
+                           + ', '.join(vcs_clipped_stations) if vcs_clipped_stations else ''))
                 elif kind == "failed":
                     self.running = False
                     self.progress.stop()

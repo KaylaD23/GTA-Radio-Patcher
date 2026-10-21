@@ -468,6 +468,51 @@ def verify_untouched_file_contents(original: Iso9660Image, staged: Iso9660Image,
     return num_files,total_bytes
 
 
+def reserved_iso_metadata_extents(iso: Iso9660Image) -> list[tuple[str, int, int]]:
+    """Locate system area, descriptor chain and ISO9660 path tables.
+
+    These extents are *not* ordinary file records. In-place payload updates
+    must never overwrite them, even when a malformed file record aliases a
+    metadata sector. The writer handles only the primary ISO9660 tree.
+    """
+    metadata: list[tuple[str, int, int]] = []
+    with iso.path.open("rb") as stream:
+        termination = None
+        for sector in range(PVD_START_SECTOR, min(MAX_DESCRIPTOR_SECTORS, iso.volume_sectors)):
+            stream.seek(sector * BLOCK)
+            descriptor = stream.read(BLOCK)
+            if len(descriptor) != BLOCK or descriptor[1:6] != b"CD001" or descriptor[6] != 1:
+                raise ValueError(f"Unsupported/malformed ISO9660 descriptor at sector {sector}")
+            if descriptor[0] == 255:
+                termination = sector + 1
+                break
+        if termination is None:
+            raise ValueError("ISO9660 volume descriptor chain lacks a supported terminator")
+        metadata.append(("<system-area-and-volume-descriptors>", 0, termination))
+        stream.seek(iso.pvd_offset + 132)
+        raw = stream.read(24)
+        if len(raw) != 24:
+            raise ValueError("Cannot read ISO9660 primary path-table locations")
+        path_table_size = _both_endian_u32(raw, 0, "path table size")
+        if path_table_size:
+            block_count = math.ceil(path_table_size / BLOCK)
+            locations = (
+                ("L path table", struct.unpack_from("<I", raw, 8)[0]),
+                ("optional L path table", struct.unpack_from("<I", raw, 12)[0]),
+                ("M path table", struct.unpack_from(">I", raw, 16)[0]),
+                ("optional M path table", struct.unpack_from(">I", raw, 20)[0]),
+            )
+            if not any(location for _, location in locations):
+                raise ValueError("ISO9660 path table has a nonzero size but no locations")
+            for name, location in locations:
+                if not location:
+                    continue
+                if location < termination or location + block_count > iso.volume_sectors:
+                    raise ValueError(f"ISO9660 {name} location is outside valid data sectors")
+                metadata.append((f"<ISO9660 {name}>", location, location + block_count))
+    return metadata
+
+
 def apply_iso_replacements(
     input_iso: Path,
     output_iso: Path,
@@ -514,6 +559,7 @@ def apply_iso_replacements(
     filesystem_entries = list(iso.entries.values())
     if iso.root_entry is not None:
         filesystem_entries.append(iso.root_entry)
+    metadata_extents = reserved_iso_metadata_extents(iso)
     for existing in filesystem_entries:
         blocks = math.ceil(existing.size / BLOCK)
         if blocks:
@@ -522,6 +568,12 @@ def apply_iso_replacements(
                 raise ValueError(
                     f"ISO source entry {existing.path or '<root>'} extends outside the declared volume"
                 )
+            for metadata_name, metadata_start, metadata_end in metadata_extents:
+                if start < metadata_end and metadata_start < end:
+                    raise ValueError(
+                        f"ISO source entry {existing.path or '<root>'} overlaps reserved "
+                        f"filesystem metadata {metadata_name}; refusing unsafe rebuild"
+                    )
             indexed_extents.append((existing.path or '<root>', start, end))
     plan = []
     target_paths = set()
@@ -781,6 +833,7 @@ def build_duration_aware_iso(
     expected_preview_metrics: Optional[Dict[str, Dict[str, int]]] = None,
     strict_original_reference: bool = True,
     boost_radio_3db: bool = False,
+    gain_db: float = 3.0,
 ) -> dict:
     """Build an LCS ISO with independently selectable authenticated EE and IOP fixes.
 
@@ -788,6 +841,9 @@ def build_duration_aware_iso(
     safe-seek arithmetic requires a shift change. Native mode preserves both.
     Staged file audits and exact preview metrics protect against input changes.
     """
+    if boost_radio_3db:
+        from radio_vb_gain import validate_gain_db
+        gain_db = validate_gain_db(gain_db)
     input_iso = Path(input_iso)
     output_iso = Path(output_iso)
     if input_iso.resolve() == output_iso.resolve():
@@ -865,7 +921,7 @@ def build_duration_aware_iso(
     if progress:
         progress(f'LCS detected {len(detected_replacements)} replacement radio(s): '
                  + (', '.join(detected_replacements) if detected_replacements else '(none)')
-                 + ('; optional +3 dB will be applied to each.' if boost_radio_3db else '; gain disabled.'))
+                 + (f'; optional +{gain_db:g} dB will be applied to each.' if boost_radio_3db else '; gain disabled.'))
 
     # One calculator derives all 10 EE boundary values and both IOP opcodes
     # directly from the incoming bytes + authentic stock ISO reference sizes.
@@ -938,8 +994,8 @@ def build_duration_aware_iso(
                 audio_source = replacement
                 if boost_radio_3db:
                     from radio_vb_gain import boost_vb
-                    boosted_path = stage_dir / f'{key}.plus3db.VB'
-                    radio_gain_reports[filename] = boost_vb(replacement, boosted_path, progress)
+                    boosted_path = stage_dir / f'{key}.gain.VB'
+                    radio_gain_reports[filename] = boost_vb(replacement, boosted_path, progress, gain_db=gain_db)
                     audio_source = boosted_path
                     # Verify the re-encoded audio before it can reach the ISO.
                     vb_audio_structure_reports[key]['boosted_audit'] = audit_vb(audio_source, full_scan=True)
@@ -1202,7 +1258,9 @@ def build_duration_aware_iso(
             "source_executable_sha256": source_executable_sha256,
             "iop_cdstream_module_structure_audit": iop_module_report,
             "replacement_vb_adpcm_structure_audit": vb_audio_structure_reports,
-            "boost_radio_3db": bool(boost_radio_3db),
+            "boost_radio_3db": bool(boost_radio_3db),  # legacy enabled-flag key
+            "gain_enabled": bool(boost_radio_3db),
+            "gain_db": gain_db if boost_radio_3db else 0.0,
             "detected_replacement_stations": detected_replacements,
             "boosted_replacement_stations": sorted(radio_gain_reports),
             "gain_by_station": radio_gain_reports,

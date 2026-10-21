@@ -143,6 +143,7 @@ class TestVCSISOOffsetIntegration(unittest.TestCase):
             result = build_radio_audio_iso(input_iso=iso, replacement_vb=radio,
                                            output_iso=output, expand_vcs_offsets=True)
             self.assertTrue(result['experimental_vcs_adaptive_offsets'])
+            self.assertEqual(result['offset_mode'], 'vcs-shared')
             self.assertEqual(result['offset_patch_report']['offset_strategy'],'shared-adaptive-experimental')
             self.assertEqual(hashlib.sha256(iso.read_bytes()).hexdigest(), source_hash)
             built = Iso9660Image(output)
@@ -152,6 +153,16 @@ class TestVCSISOOffsetIntegration(unittest.TestCase):
             self.assertEqual(hashlib.sha256(built.read_entry_bytes('SLUS_215.90')).hexdigest(),
                              result['offset_patch_report']['patched_sha256'])
             self.assertEqual(built.volume_sectors * 2048, built.size)
+
+    def test_invalid_and_conflicting_vcs_offset_modes_rejected_before_output(self):
+        from vcs_vb_gain_install import build_radio_audio_iso
+        with tempfile.TemporaryDirectory() as root:
+            r=Path(root)
+            for mode, legacy in [('vcs-station-specific', False), ('vcs-stock',True), ('iop-elf-shared',False)]:
+                with self.subTest(mode=mode,legacy=legacy),self.assertRaises(ValueError):
+                    build_radio_audio_iso(input_iso=r/'missing.iso',replacement_vb=r/'VCPR.VB',
+                        output_iso=r/'out.iso',offset_mode=mode,expand_vcs_offsets=legacy)
+            self.assertFalse((r/'out.iso').exists())
 
     def test_unknown_prepatched_iso_does_not_publish_output(self):
         from vcs_vb_gain_install import build_radio_audio_iso
@@ -174,22 +185,109 @@ class TestVCSISOOffsetIntegration(unittest.TestCase):
 
 class TestVCSOffsetGUI(unittest.TestCase):
     @unittest.skipUnless(__import__('os').environ.get('DISPLAY'), 'Tk GUI needs X11/Xvfb')
-    def test_option_disabled_by_default_and_only_on_vcs(self):
+    def test_existing_dropdown_routes_stock_and_adaptive_to_vcs_buttons(self):
         import tkinter as tk
-        from gta_radio_patcher_gui import DurationPatcherGUI
+        from gta_radio_patcher_gui import (
+            DurationPatcherGUI, VCS_OFFSET_MODE_LABELS, OFFSET_MODE_LABELS,
+            DEFAULT_LCS_OFFSET_LABEL,
+        )
         root = tk.Tk()
         try:
             app = DurationPatcherGUI(root)
-            self.assertFalse(app.vcs_adaptive_offsets_var.get())
-            self.assertEqual(str(app.vcs_offset_checkbox.cget('state')), 'disabled')
+            self.assertFalse(hasattr(app, 'vcs_offset_checkbox'))
+            self.assertFalse(hasattr(app, 'vcs_adaptive_offsets_var'))
+            self.assertEqual(str(app.offset_mode_combo.cget('state')), 'readonly')
+            self.assertEqual(tuple(app.offset_mode_combo.cget('values')), tuple(OFFSET_MODE_LABELS))
+            self.assertEqual(app.offset_mode_var.get(), DEFAULT_LCS_OFFSET_LABEL)
             app.profile_var.set('GTA VCS — PS2 (EE overflow fix)')
             app._profile_changed()
-            self.assertEqual(str(app.vcs_offset_checkbox.cget('state')), 'normal')
-            app.vcs_adaptive_offsets_var.set(True)
-            app._vcs_offset_checkbox_changed()
-            self.assertIn('OFFSET ELF',app.vcs_iso_install_button.cget('text'))
+            self.assertEqual(str(app.offset_mode_combo.cget('state')), 'readonly')
+            self.assertEqual(tuple(app.offset_mode_combo.cget('values')), tuple(VCS_OFFSET_MODE_LABELS))
+            self.assertEqual(app._selected_offset_mode(), 'vcs-stock')
+            self.assertFalse(app._vcs_offsets_selected())
+            self.assertNotIn('OFFSET ELF',app.vcs_iso_install_button.cget('text'))
+            adaptive_label = next(k for k,v in VCS_OFFSET_MODE_LABELS.items() if v=='vcs-shared')
+            app.offset_mode_var.set(adaptive_label)
+            app._offset_mode_changed()
+            self.assertTrue(app._vcs_offsets_selected())
+            self.assertIn('OFFSET ELF', app.vcs_iso_install_button.cget('text'))
+            self.assertIn('ADAPTIVE OFFSETS', app.vcs_exe_fix_button.cget('text'))
+            self.assertIn('heap', app.offset_mode_help_var.get())
             app.profile_var.set('GTA LCS — PS2 (patching)')
             app._profile_changed()
-            self.assertEqual(str(app.vcs_offset_checkbox.cget('state')), 'disabled')
+            self.assertEqual(tuple(app.offset_mode_combo.cget('values')), tuple(OFFSET_MODE_LABELS))
+            self.assertEqual(app.offset_mode_var.get(), DEFAULT_LCS_OFFSET_LABEL)
+            app.profile_var.set('GTA VCS — PS2 (EE overflow fix)')
+            app._profile_changed()
+            self.assertEqual(app.offset_mode_var.get(), adaptive_label)
+            self.assertTrue(app._vcs_offsets_selected())
+            stock_label = next(k for k,v in VCS_OFFSET_MODE_LABELS.items() if v=='vcs-stock')
+            app.offset_mode_var.set(stock_label)
+            app._offset_mode_changed()
+            self.assertFalse(app._vcs_offsets_selected())
+            self.assertNotIn('OFFSET ELF', app.vcs_iso_install_button.cget('text'))
         finally:
             root.destroy()
+
+    @unittest.skipUnless(__import__('os').environ.get('DISPLAY'), 'Tk GUI needs X11/Xvfb')
+    def test_iso_installer_receives_dropdown_mode(self):
+        import tkinter as tk
+        from gta_radio_patcher_gui import DurationPatcherGUI, VCS_OFFSET_MODE_LABELS
+        from gta_radio_profiles import PROFILES
+        from unittest.mock import patch
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            folder=Path(td)
+            (folder/'disc.iso').write_bytes(b'placeholder')
+            (folder/'VCPR.VB').write_bytes(b'placeholder')
+            root=tk.Tk()
+            try:
+                app=DurationPatcherGUI(root)
+                app.profile_var.set(PROFILES['vcs_ps2'].display)
+                app._profile_changed()
+                app.input_iso_var.set(str(folder/'disc.iso'))
+                app.radio_dir_var.set(str(folder/'VCPR.VB'))
+                app.output_iso_var.set(str(folder/'new.iso'))
+                for code in ('vcs-stock','vcs-shared'):
+                    app.offset_mode_var.set(next(k for k,v in VCS_OFFSET_MODE_LABELS.items() if v==code))
+                    app._offset_mode_changed()
+                    with patch('gta_radio_patcher_gui.messagebox.askyesno',return_value=False) as confirmation, \
+                         patch('gta_radio_patcher_gui.messagebox.showerror') as error:
+                        app._vcs_install_clicked()
+                        confirmation.assert_called_once()
+                        error.assert_not_called()
+                        msg=confirmation.call_args.args[1]
+                        self.assertEqual('EXPERIMENTAL VCS OFFSET ELF ENABLED' in msg, code=='vcs-shared')
+            finally:
+                root.destroy()
+
+    @unittest.skipUnless(__import__('os').environ.get('DISPLAY'), 'Tk GUI needs X11/Xvfb')
+    def test_standalone_elf_dispatch_uses_selected_dropdown(self):
+        import tkinter as tk
+        from gta_radio_patcher_gui import DurationPatcherGUI, VCS_OFFSET_MODE_LABELS
+        from gta_radio_profiles import PROFILES
+        from unittest.mock import patch
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            folder=Path(td)
+            infile=folder/'SLUS_215.90'
+            infile.write_bytes(b'reference fixture')
+            (folder/'VCPR.VB').write_bytes(bytes(0x4000*3))
+            root=tk.Tk()
+            try:
+                app=DurationPatcherGUI(root)
+                app.profile_var.set(PROFILES['vcs_ps2'].display)
+                app._profile_changed()
+                app.input_exe_var.set(str(infile))
+                app.radio_dir_var.set(str(folder/'VCPR.VB'))
+                for code in ('vcs-stock','vcs-shared'):
+                    app.offset_mode_var.set(next(k for k,v in VCS_OFFSET_MODE_LABELS.items() if v==code))
+                    app._offset_mode_changed()
+                    with patch('gta_radio_patcher_gui.filedialog.asksaveasfilename', return_value='') as chooser, \
+                         patch('gta_radio_patcher_gui.messagebox.showerror') as error:
+                        app._patch_vcs_executable_clicked()
+                        chooser.assert_called_once()
+                        error.assert_not_called()
+                        self.assertEqual('adaptive offsets' in chooser.call_args.kwargs['title'],code=='vcs-shared')
+            finally:
+                root.destroy()

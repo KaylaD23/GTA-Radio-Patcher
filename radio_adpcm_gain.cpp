@@ -1,4 +1,4 @@
-// GTA LCS/VCS PS2 raw stereo PSX ADPCM loudness processing.
+// GTA LCS/VCS PS2 raw stereo PSX ADPCM loudness processing (0.1..3.0 dB).
 // Build: g++ -O3 -std=c++17 -Wall -Wextra radio_adpcm_gain.cpp -o vcs_adpcm_gain
 // Requires fixed 0x2000-byte per-channel interleaving (0x4000-byte pairs).
 // Preserves every frame's byte-1 flags and the complete file length/interleave.
@@ -89,7 +89,13 @@ static void encode_frame(const std::array<int,28> &target, uint8_t flags,
 }
 int main(int argc, char **argv) {
     try {
-        if (argc!=3) throw std::runtime_error("Usage: radio_adpcm_gain INPUT.VB NEW_OUTPUT.VB (+3.0 dB fixed)");
+        if (argc!=3 && argc!=4) throw std::runtime_error("Usage: radio_adpcm_gain INPUT.VB NEW_OUTPUT.VB GAIN_DB (0.1 to 3.0)");
+        const std::string gain_arg=(argc==3 ? "3.0" : argv[3]);
+        std::size_t consumed=0;
+        const double gain_db=std::stod(gain_arg,&consumed);
+        if (consumed!=gain_arg.size() || !std::isfinite(gain_db) || gain_db<0.1 || gain_db>3.0)
+            throw std::runtime_error("Gain must be a finite number between 0.1 and 3.0 dB");
+        const double gain=std::pow(10.0,gain_db/20.0);
         fs::path input=argv[1],output=argv[2];
         if (!fs::is_regular_file(input)) throw std::runtime_error("Input file missing");
         if(fs::exists(output)||fs::absolute(input).lexically_normal()==fs::absolute(output).lexically_normal()) throw std::runtime_error("Output exists or matches input: refusing overwrite");
@@ -100,7 +106,6 @@ int main(int argc, char **argv) {
         if(!src||!dst) throw std::runtime_error("Cannot open source or new destination");
         std::array<uint8_t,PAIR> buffer{},transformed{};
         State original[2],reencoded[2];Stats st;
-        constexpr double gain=1.4125375446227544; // 10^(3/20)
         try {
             for (uintmax_t off=0;off<length;off+=PAIR) {
                 src.read(reinterpret_cast<char*>(buffer.data()),PAIR);
@@ -139,7 +144,7 @@ int main(int argc, char **argv) {
         double orig_rms=std::sqrt(double(st.orig_sq/st.samples));
         double new_rms=std::sqrt(double(st.new_sq/st.samples));
         double actual_db = (orig_rms>0 && new_rms>0) ? 20*std::log10(new_rms/orig_rms) : 0;
-        std::cout<<std::setprecision(10)<<"{\"requested_gain_db\":3.0,\"measured_decoded_rms_gain_db\":"<<actual_db
+        std::cout<<std::setprecision(10)<<"{\"requested_gain_db\":"<<gain_db<<",\"measured_decoded_rms_gain_db\":"<<actual_db
                  <<",\"original_peak\":"<<st.orig_peak<<",\"boosted_peak\":"<<st.new_peak
                  <<",\"target_clipped_samples\":"<<st.clipped_target<<",\"samples\":"<<st.samples
                  <<",\"frames\":"<<st.frames<<",\"bytes\":"<<length

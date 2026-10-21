@@ -1,0 +1,16 @@
+{
+  "status": "PASS_STATIC_ISO_BUILD_ONLY",
+  "actual_kjah_source_bytes": 367017984,
+  "head_replacement_bytes": 524288,
+  "mode": "iop-elf-shared",
+  "original_iso_bytes": 4010016768,
+  "patched_iso_bytes": 4380041216,
+  "written_offset_count": 2008,
+  "original_reference_station_count": 10,
+  "seek_extra_shift": 4,
+  "position_overflow_patch_required": true,
+  "verification": "PASSED_ON_STAGED_ISO_BEFORE_PUBLICATION",
+  "unmodified_lcfr_extent_and_size_preserved": true,
+  "elapsed_seconds": 19.8,
+  "pcsx2_runtime_not_tested": true
+}

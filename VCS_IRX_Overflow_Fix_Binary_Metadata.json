@@ -1,0 +1,32 @@
+{
+  "original_sha256": "a72b95c6f0db77ba0363196b9d36ce1ac8585560a0730edc4125f29c12b71371",
+  "new_sha256": "a29d2badb270e68d9851930ceedbb2fa7624b8708d20aec88657e8d5d2f0b695",
+  "original_bytes": 48540,
+  "patched_bytes": 61628,
+  "stub_text_va": "0xb460",
+  "stub_file_offset": "0xb500",
+  "patched_text_offsets": [
+    "0x2560",
+    "0x2564",
+    "0x2580"
+  ],
+  "patch_opcodes": {
+    "0x2560": "0x100023bf",
+    "0x2564": "0x0",
+    "0x2580": "0xa01021"
+  },
+  "stub_words": [
+    "28c50000",
+    "30c20007",
+    "0002102b",
+    "38a50001",
+    "00a22824",
+    "000610c3",
+    "00a22821",
+    "00c52823",
+    "1000dc3b",
+    "3c031062"
+  ],
+  "original_irx_preserved": true,
+  "iso_writing_enabled": false
+}

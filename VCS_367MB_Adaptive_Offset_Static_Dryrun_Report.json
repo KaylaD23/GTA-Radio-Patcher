@@ -1,0 +1,40 @@
+{
+  "profile": "vcs_ps2",
+  "revision": "SLUS_215.90 US",
+  "source_baseline": "original",
+  "original_sha256": "3b43be57d60a29df35e41504d67bbf728d5ce2fc5aab6bbf928cbbc5963fe547",
+  "patched_sha256": "eb0a467670c8f74fe7f903f7dbf4b94764d70987593de85c2fb3d4fc059f3a49",
+  "ee_divu_fixes": "applied",
+  "offset_strategy": "shared-adaptive-experimental",
+  "station_sizes_bytes": {
+    "vcpr": 367017984
+  },
+  "table_va": "0x00780000",
+  "table_file_offset": "0x3CF000",
+  "original_ee_pt_load_memory_end": "0x0074DF54",
+  "gap_after_original_ee_load_bytes": 204972,
+  "new_segment_end_va": "0x00781F68",
+  "program_header_count": 2,
+  "status": "EXPERIMENTAL: STATIC BINARY VERIFIED; NOT PCSX2/PS2 VERIFIED",
+  "risk": "Additional PT_LOAD at 0x00780000 is outside original load span but not confirmed free of heap/stack allocations at runtime.",
+  "limitations": [
+    "Changes original random offset table pointer and pool, not the game PRNG, station rebase frequency, saved position or streaming seek.",
+    "Offset candidates may still produce repeated audible sections because other position contributions are added.",
+    "Standalone ELF only; new executable must be installed separately by a verified ISO editing workflow.",
+    "One shared table for nine stations; station-specific mode remains unimplemented for VCS."
+  ],
+  "offsets": {
+    "selected_station_max_size_bytes": 367017984,
+    "selected_station_duration_ms": 10035648,
+    "table_count": 2008,
+    "stock_nonzero_entries": 29,
+    "stock_runtime_entries_per_cycle": 28,
+    "selected_cursor_entries_per_cycle": 2008,
+    "target_spacing_ms": 5000,
+    "average_distribution_spacing_ms": 4997.833,
+    "stride": 1241,
+    "smallest_sequential_circular_gap_bytes": 140083200,
+    "table_sha256": "676ac88c35ba666a60a17016e45f9b648b28adae6d2855a69ac2a947f1c4c38d",
+    "note": "One shared choice per reset across nine stations. Additional PRNG/saved-position terms remain unchanged; positions and acoustic repetition are not guaranteed."
+  }
+}

@@ -1,0 +1,227 @@
+{
+  "scope": "ten stock music station streams from user-provided game split ZIP, integrity checked on decompression",
+  "executable_sha256": "65bc2ec3d8a1b9f8482fb7e69427f2539e7e7b49d9dd262bf31aa8aa54ec53b2",
+  "music": [
+    {
+      "size_bytes": 58392576,
+      "duration_ms_hypothesis": 1596672,
+      "estimated_duration_seconds": 1596.672,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 28512,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "5bb2edb4",
+      "sha256": "678fdc3a13a9d23e5db79520f65fecbb14c7e1481ff38701c2afe043c35fb375",
+      "name": "HEAD.VB"
+    },
+    {
+      "size_bytes": 58245120,
+      "duration_ms_hypothesis": 1592640,
+      "estimated_duration_seconds": 1592.64,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 28440,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "6ecde8fb",
+      "sha256": "36baa2590fa633b288306323b1edaca308b4bbe295be4fe8051d5e9805388703",
+      "name": "DOUBLE.VB"
+    },
+    {
+      "size_bytes": 63176704,
+      "duration_ms_hypothesis": 1727488,
+      "estimated_duration_seconds": 1727.488,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 30848,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "4b0481d5",
+      "sha256": "048339e04fc2910106c470665db38bf162fb17dcb85cb0aeae5dba77696d0073",
+      "name": "KJAH.VB"
+    },
+    {
+      "size_bytes": 92897280,
+      "duration_ms_hypothesis": 2540160,
+      "estimated_duration_seconds": 2540.16,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 45360,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "d762c252",
+      "sha256": "02f99dcd3ae1a34ccc3a38c7ae4b3bccb0e0600296cc0906caa2ec1e5ac5ff99",
+      "name": "RISE.VB"
+    },
+    {
+      "size_bytes": 61390848,
+      "duration_ms_hypothesis": 1678656,
+      "estimated_duration_seconds": 1678.656,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 29976,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "a777efc8",
+      "sha256": "43f08cf84e1cc31480d780fc4f87b43daa08c8edfc41f4ebcb82809ec4d46c0d",
+      "name": "LIPS.VB"
+    },
+    {
+      "size_bytes": 73728000,
+      "duration_ms_hypothesis": 2016000,
+      "estimated_duration_seconds": 2016.0,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 36000,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "cb2e7f93",
+      "sha256": "3b527e3901c550692beb69f7ffcae2d1efe7d9c0b5e40cf6e1635c26eef428b1",
+      "name": "MUNDO.VB"
+    },
+    {
+      "size_bytes": 85147648,
+      "duration_ms_hypothesis": 2328256,
+      "estimated_duration_seconds": 2328.256,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 41576,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "a9fcc7de",
+      "sha256": "21af654f8aad75c96d7bf408c537b7c458e582fb77d9e25f8288ad0b4ab86685",
+      "name": "MSX.VB"
+    },
+    {
+      "size_bytes": 63537152,
+      "duration_ms_hypothesis": 1737344,
+      "estimated_duration_seconds": 1737.344,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 31024,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "efcda2df",
+      "sha256": "d045c3c6c185d19ce66361f1a1bf788579ac92f77e23cba725e719db6a59be38",
+      "name": "FLASH.VB"
+    },
+    {
+      "size_bytes": 104431616,
+      "duration_ms_hypothesis": 2855552,
+      "estimated_duration_seconds": 2855.552,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 50992,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "5b779e65",
+      "sha256": "5a9c7e90b1b62f225fa7cc722bb6452e2c5063d2e14db5f6ea50f0ead0305b14",
+      "name": "LCJ.VB"
+    },
+    {
+      "size_bytes": 110247936,
+      "duration_ms_hypothesis": 3014592,
+      "estimated_duration_seconds": 3014.592,
+      "sample_rate_assumed_hz": 32000,
+      "stereo_channel_interleave_bytes": 8192,
+      "stream_sectors": 53832,
+      "sectors_over_16bit_boundary": false,
+      "frame_scan": "distributed 256-KiB windows",
+      "scanned_frame_counts": {
+        "frames": 147456,
+        "invalid_predictors": 0,
+        "invalid_shifts": 0,
+        "invalid_flags": 0,
+        "zero_frames": 2
+      },
+      "warnings": [],
+      "validation": "FORMAT_STRUCTURE_PASSED_NOT_PLAYBACK_VERIFIED",
+      "original_zip_crc32": "3d816fb1",
+      "sha256": "d1679f908f5ca1849b0cba0082609a5496d68feddbe93ac99ec0d989818976a4",
+      "name": "LCFR.VB"
+    }
+  ],
+  "interpretation": "Stock streams pass raw ADPCM frame checks in sampled regions. Duration units used in EXE patch remain unproven at runtime."
+}

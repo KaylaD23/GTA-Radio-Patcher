@@ -134,7 +134,7 @@ class ProfileGUIIntegration(unittest.TestCase):
         self.assertIn('vcpr',gui.tree.get_children())
         self.assertNotIn('kjah',gui.tree.get_children())
         self.assertEqual(str(gui.run_button.cget('state')),'disabled')
-        self.assertEqual(str(gui.offset_mode_combo.cget('state')),'disabled')
+        self.assertEqual(str(gui.offset_mode_combo.cget('state')),'readonly')
         self.assertEqual(gui.input_iso_var.get(),'')
         self.assertEqual(gui.radio_dir_var.get(),'')
         gui.profile_var.set(PROFILES['lcs_ps2'].display)

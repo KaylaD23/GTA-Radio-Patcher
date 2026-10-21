@@ -1,4 +1,4 @@
-"""Optional +3 dB for a single LCS/VCS PS2 raw stereo PSX ADPCM VB.
+"""Optional selectable +0.1 to +3.0 dB gain for LCS/VCS stereo PSX ADPCM VB.
 
 No game EXE/IRX modifications; outputs a new same-size VB in caller's
 staging directory. Encoder handles 8 KiB/channel interleave and copies frame
@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import math
 import shutil
 import subprocess
 import tempfile
@@ -16,6 +17,23 @@ from typing import Callable
 
 SOURCE = Path(__file__).with_name('radio_adpcm_gain.cpp')
 PAIR = 0x4000
+
+
+def validate_gain_db(value: float) -> float:
+    """Reject out-of-range, NaN, infinities, booleans and nonnumeric values.
+
+    Arbitrary fractional values in [0.1, 3.0] are allowed. The GUI steps
+    by 0.1 dB but typed values are not silently rounded.
+    """
+    if isinstance(value, bool):
+        raise ValueError('Gain must be a number from 0.1 to 3.0 dB')
+    try:
+        gain = float(value)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ValueError('Gain must be a number from 0.1 to 3.0 dB') from exc
+    if not math.isfinite(gain) or not 0.1 <= gain <= 3.0:
+        raise ValueError('Gain must be a finite number from 0.1 to 3.0 dB')
+    return gain
 
 
 def validate_gain_source(path: Path) -> int:
@@ -57,21 +75,23 @@ def compile_gain_engine(progress: Callable[[str], None] | None = None) -> Path:
         if run.returncode == 0 and binary.is_file():
             return binary
         problems.append(f'{name}: {(run.stderr or run.stdout)[-700:]}')
-    raise RuntimeError('Optional +3 dB gain needs a working C++17 compiler (MinGW g++, clang++ or MSVC cl). '
+    raise RuntimeError('Optional radio gain needs a working C++17 compiler (MinGW g++, clang++ or MSVC cl). '
                        'Use a Windows compiler or Visual Studio Developer Command Prompt. '\
                        + '\n'.join(problems))
 
 
-def boost_vb(input_vb: Path, output_vb: Path, progress: Callable[[str], None] | None = None) -> dict:
+def boost_vb(input_vb: Path, output_vb: Path, progress: Callable[[str], None] | None = None,
+             gain_db: float = 3.0) -> dict:
     """Boost exactly one VB. No input overwrite, and reject changed file size."""
+    gain_db = validate_gain_db(gain_db)
     src, dst = Path(input_vb), Path(output_vb)
     size = validate_gain_source(src)
     if src.resolve() == dst.resolve() or dst.exists():
         raise FileExistsError('Boosted output must be new and distinct from source')
     engine = compile_gain_engine(progress)
     if progress:
-        progress(f'Applying +3 dB to {src.name}, preserving flags and stream byte length…')
-    run = subprocess.run([str(engine), str(src), str(dst)], capture_output=True, text=True)
+        progress(f'Applying +{gain_db:g} dB to {src.name}, preserving flags and stream byte length…')
+    run = subprocess.run([str(engine), str(src), str(dst), f"{gain_db:.12g}"], capture_output=True, text=True)
     if run.returncode:
         dst.unlink(missing_ok=True)
         raise RuntimeError(f'PS2 ADPCM gain failed for {src.name}: {run.stderr[-1500:]}')
@@ -80,6 +100,8 @@ def boost_vb(input_vb: Path, output_vb: Path, progress: Callable[[str], None] | 
         if dst.stat().st_size != size or result.get('bytes') != size:
             raise IOError(f'{src.name}: boosted stream length differs from original')
         validate_gain_source(dst)
+        if not math.isclose(float(result.get('requested_gain_db', -1)), gain_db, rel_tol=0, abs_tol=1e-8):
+            raise IOError(f'{src.name}: gain engine returned a different gain than requested')
         result['source'] = str(src)
         result['output'] = str(dst)
         return result

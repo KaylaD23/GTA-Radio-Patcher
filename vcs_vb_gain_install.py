@@ -1,4 +1,4 @@
-"""VCS PS2 ISO installer: any station VB, optional +3 dB and experimental offsets.
+"""VCS PS2 ISO installer: any station VB, optional 0.1-3.0 dB gain and offsets.
 
 By default all executable and IOP code is preserved. The explicitly enabled
 adaptive-offset mode replaces ONLY a strictly recognized original or EE DIVU-
@@ -20,7 +20,7 @@ from typing import Callable, Optional
 from lcs_duration_aware_iso_patcher import Iso9660Image, apply_iso_replacements, BLOCK, sha256_file
 
 from gta_radio_profiles import get_profile
-from radio_vb_gain import compile_gain_engine, validate_gain_source as validate_vb, boost_vb
+from radio_vb_gain import compile_gain_engine, validate_gain_source as validate_vb, boost_vb, validate_gain_db
 
 EXPECTED_BOOT = 'SLUS_215.90'
 Progress = Optional[Callable[[str], None]]
@@ -88,8 +88,10 @@ def _get_replacements(source: Path, station: str | None = None) -> dict[str, Pat
 
 def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
                           output_iso: Path, boost_radio_3db: bool = False,
+                          gain_db: float = 3.0,
                           station: str | None = None,
                           expand_vcs_offsets: bool = False,
+                          offset_mode: str | None = None,
                           progress: Progress = None, report_path: Path | None = None) -> dict:
     """Create a NEW VCS USA ISO with any selected radio station(s) replaced.
 
@@ -98,6 +100,17 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
     EE variants are rejected to avoid silently erasing existing user patches.
     The IOP module is always preserved. The VCS PT_LOAD addition is experimental.
     """
+    if boost_radio_3db:
+        gain_db = validate_gain_db(gain_db)
+    # Explicit mode comes from the GUI's shared offset-mode dropdown. Preserve
+    # the old boolean for scripts/tests that use the previous experimental flag.
+    if offset_mode is None:
+        offset_mode = 'vcs-shared' if expand_vcs_offsets else 'vcs-stock'
+    if offset_mode not in ('vcs-stock', 'vcs-shared'):
+        raise ValueError(f'Unsupported VCS offset mode: {offset_mode!r}')
+    if expand_vcs_offsets and offset_mode != 'vcs-shared':
+        raise ValueError('Contradictory VCS offset mode arguments')
+    expand_vcs_offsets = offset_mode == 'vcs-shared'
     input_iso, replacement_vb, output_iso = map(Path, (input_iso, replacement_vb, output_iso))
     files = [input_iso, replacement_vb, output_iso]
     if len({p.resolve() for p in files}) != 3:
@@ -118,7 +131,7 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
     if progress:
         progress(f'VCS detected {len(replacements)} replacement radio(s): '
                  + ', '.join(sorted(replacements))
-                 + ('; applying optional +3 dB to each.' if boost_radio_3db else '; gain disabled.'))
+                 + (f'; applying optional +{gain_db:g} dB to each.' if boost_radio_3db else '; gain disabled.'))
     sizes = {name: validate_vb(path) for name, path in replacements.items()}
     validate_radio_sizes(list(sizes.values()))
     destinations = {'AUDIO/MUSIC/' + name: path for name, path in replacements.items()}
@@ -148,7 +161,7 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
         if boost_radio_3db:
             for name, src in replacements.items():
                 dst = staging / name
-                gain_reports[name] = boost_vb(src, dst, progress)
+                gain_reports[name] = boost_vb(src, dst, progress, gain_db=gain_db)
                 destinations['AUDIO/MUSIC/' + name] = dst
         def post_verify(image):
             if hashlib.sha256(image.read_entry_bytes(EXPECTED_BOOT)).hexdigest() != expected_exe_sha:
@@ -164,10 +177,11 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
                       else 'retaining existing EE/IOP patches…'))
         installed = apply_iso_replacements(input_iso, output_iso, destinations, progress, post_verify)
     result = {
-        'profile':'vcs_ps2', 'purpose':'Any-station VCS ISO installation (optional experimental offset EE)',
+        'profile':'vcs_ps2', 'offset_mode':offset_mode, 'purpose':'Any-station VCS ISO installation (optional experimental offset EE)',
         'input_iso':str(input_iso), 'output_iso':str(output_iso),
         'iso_targets':sorted(destinations), 'vb_input_bytes':sizes,
-        'boost_radio_3db':bool(boost_radio_3db),
+        'boost_radio_3db':bool(boost_radio_3db), # legacy enabled-flag key
+        'gain_enabled':bool(boost_radio_3db), 'gain_db':gain_db if boost_radio_3db else 0.0,
         'detected_replacement_stations':sorted(replacements),
         'boosted_replacement_stations':sorted(gain_reports),
         'gain_by_station':gain_reports,
@@ -179,7 +193,7 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
         'cdstream_preserved_sha256':original_irx_sha, 'gameplay_verified':False,
         'notice':('Experimental VCS shared offset ELF injected; runtime heap/loader safety unverified, IOP preserved.'
                   if expand_vcs_offsets else 'EE, IOP and random-offset patch code preserved but not added.')
-                 + ' +3 dB does not fix fade-in timing.'
+                 + ' Gain adjustment does not fix fade-in timing.'
     }
     if len(replacements) == 1:
         name = next(iter(replacements))
@@ -187,35 +201,48 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
         result['gain'] = gain_reports.get(name)
         result['boost_vcpr_3db'] = bool(boost_radio_3db) if name == 'VCPR.VB' else False
     if report_path is not None:
-        with report_path.open('x', encoding='utf-8') as dest:
-            json.dump(result, dest, indent=2)
+        # The verified ISO has already been published. Do not tell the GUI the
+        # game build failed solely because an optional JSON report was unwritable.
+        try:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            with report_path.open('x', encoding='utf-8') as dest:
+                json.dump(result, dest, indent=2)
+            result['report_path'] = str(report_path.resolve())
+        except OSError as exc:
+            result['report_write_error'] = f'ISO built successfully, but the JSON report could not be saved: {exc}'
+            if progress:
+                progress('WARNING: ' + result['report_write_error'])
     return result
 
 
 def build_vcpr_audio_iso(*, input_iso: Path, replacement_vb: Path,
                          output_iso: Path, boost_vcpr_3db: bool = False,
+                         gain_db: float = 3.0,
                          progress: Progress = None, report_path: Path | None = None) -> dict:
     """Backwards-compatible API for the earlier VCPR-only installer."""
     return build_radio_audio_iso(input_iso=input_iso, replacement_vb=replacement_vb,
-        output_iso=output_iso, boost_radio_3db=boost_vcpr_3db, station='VCPR',
+        output_iso=output_iso, boost_radio_3db=boost_vcpr_3db, gain_db=gain_db, station='VCPR',
         progress=progress, report_path=report_path)
 
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='Install any VCS PS2 radio .VB(s) into a NEW US ISO; optional +3 dB')
+    parser = argparse.ArgumentParser(description='Install any VCS PS2 radio .VB(s) into a NEW US ISO; optional 0.1-3.0 dB gain')
     parser.add_argument('--input-iso', required=True, type=Path)
     parser.add_argument('--radio-vb', '--vcpr-vb', dest='source', required=True, type=Path,
                         help='A named .VB file or folder of station .VB files')
     parser.add_argument('--station', help='Target station for a single .VB with any filename')
     parser.add_argument('--output-iso', required=True, type=Path)
-    parser.add_argument('--boost-3db', action='store_true')
+    parser.add_argument('--boost-3db', action='store_true', help='Enable +3 dB gain (legacy option)')
+    parser.add_argument('--gain-db', type=validate_gain_db, default=None, help='Enable gain and select amount, 0.1 to 3.0 dB')
     parser.add_argument('--experimental-vcs-offsets', action='store_true',
                         help='Opt-in ~5-second shared offset ELF patch (known original/DIVU only). Runtime unverified.')
     parser.add_argument('--report', type=Path)
     ns = parser.parse_args()
     print(json.dumps(build_radio_audio_iso(input_iso=ns.input_iso, replacement_vb=ns.source,
-        output_iso=ns.output_iso, station=ns.station, boost_radio_3db=ns.boost_3db,
+        output_iso=ns.output_iso, station=ns.station,
+        boost_radio_3db=(ns.boost_3db or ns.gain_db is not None),
+        gain_db=ns.gain_db if ns.gain_db is not None else 3.0,
         expand_vcs_offsets=ns.experimental_vcs_offsets,
         report_path=ns.report, progress=lambda line: print(line, file=sys.stderr, flush=True)), indent=2))
 
