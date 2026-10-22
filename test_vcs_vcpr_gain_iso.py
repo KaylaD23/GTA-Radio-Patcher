@@ -70,7 +70,7 @@ class TestVCSGain(unittest.TestCase):
             d=Path(td)
             iso=d/'us.iso';target=d/'VCPR.VB';output=d/'plus3.iso'
             # This is a minimal synthetic ISO fixture, not a real GTA game image.
-            make_iso(iso,b'ELF__VCS_TEST',b'IRX__VCS_TEST')
+            make_iso(iso,(Path(__file__).with_name('SLUS_215.90.reference').read_bytes()),(Path(__file__).with_name('CDSTREAM_VCS_Experimental_Fixed.IRX').read_bytes()))
             data=iso.read_bytes().replace(b'SLUS_214.23',b'SLUS_215.90').replace(b'KJAH.VB',b'VCPR.VB')
             iso.write_bytes(data)
             generate_vb(target,pairs=3)
@@ -83,7 +83,8 @@ class TestVCSGain(unittest.TestCase):
             self.assertEqual(result['gain']['requested_gain_db'],3.0)
             after=Iso9660Image(output)
             self.assertEqual(after.get('AUDIO/MUSIC/VCPR.VB').size,target.stat().st_size)
-            self.assertEqual(after.read_entry_bytes('SLUS_215.90'),elf)
+            self.assertNotEqual(after.read_entry_bytes('SLUS_215.90'),elf)
+            self.assertTrue(result['ee_position_guard_report'])
             self.assertEqual(after.read_entry_bytes('MODULES/CDSTREAM.IRX'),irx)
             self.assertEqual(after.read_entry_bytes('AUDIO/MUSIC/HEAD.VB'),
                              orig.read_entry_bytes('AUDIO/MUSIC/HEAD.VB'))

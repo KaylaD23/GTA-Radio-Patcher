@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""VCS PS2 SLUS_215.90: conservative unsigned EE time/position conversion fix.
+"""VCS PS2 legacy math-only two-DIVU EE conversion functions.
+
+WARNING: patched_bytes/patch_file retain the older unsafe negative-position
+behavior for reproducible regression/compatibility. The GUI and command-line
+entry point now use vcs_ee_guarded_position instead.
+
 
 Exact-release-only patch. The source is never overwritten. The two 32-bit
 signed DIV operations at the verified 0x90000 and 0x90100 conversion sites
@@ -213,7 +218,9 @@ def main() -> int:
         if args.report.exists():
             p.error('JSON report exists; refusing to overwrite')
     sizes=[f.stat().st_size for f in args.vb]
-    result=patch_file(args.input,args.output,sizes)
+    from vcs_ee_guarded_position import patch_file as guarded_patch_file
+    result=guarded_patch_file(args.input,args.output,
+                              {f'vb_{i}':size for i,size in enumerate(sizes)})
     encoded=json.dumps(result,indent=2)
     if args.report:
         with args.report.open('x',encoding='utf-8') as f:

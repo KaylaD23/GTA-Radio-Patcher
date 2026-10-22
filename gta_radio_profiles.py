@@ -37,7 +37,7 @@ PROFILES = {
         'SLUS_215.90',
         tuple((s.lower(), s + '.VB') for s in
               ('FLASH', 'VROCK', 'PARADISE', 'VCPR', 'VCFL', 'WAVE', 'FRESH', 'ESPANT', 'EMOTION')),
-        False, 'VCS 1s–4h39m target calculator and exact-revision standalone EE overflow fix; IOP seek and ISO build pending.'
+        False, 'VCS 1s–4h39m calculator, guarded EE position and authenticated CDSTREAM.IRX auto-install in GUI ISO builder. New ELF/IRX load paths are PCSX2-unverified.'
     ),
 }
 

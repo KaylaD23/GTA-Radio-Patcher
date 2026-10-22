@@ -119,7 +119,7 @@ class TargetRangeTests(unittest.TestCase):
             self.assertTrue(report['output_verified'])
             self.assertEqual(report['max_supported_aligned_bytes'],MAX_ALIGNED_SAFE_BYTES)
             self.assertEqual(report['vcs_target_source_duration_ms'],[1_000,16_740_000])
-            self.assertEqual(output.stat().st_size,original.stat().st_size)
+            self.assertGreater(output.stat().st_size,original.stat().st_size) # guarded EE helper uses new PT_LOAD
             with self.assertRaises(UnverifiedGameWriterError):
                 get_backend('vcs_ps2').build(output_iso=Path(tmp)/'out.iso')
             self.assertFalse((Path(tmp)/'out.iso').exists())

@@ -100,7 +100,7 @@ class TestVCSArithmetic(unittest.TestCase):
             dst=Path(tmp)/'patched'
             result=get_backend('vcs_ps2').patch_executable_overflow_only(
                 inp,dst,{'vcpr':367_017_984})
-            self.assertEqual(result['patches'][1]['name'],'playback_position_divu')
+            self.assertIn('signed DIV for negative',result['ee_position_negative_guard'])
             self.assertTrue(dst.is_file())
             with self.assertRaises(ValueError):get_backend('vcs_ps2').patch_executable_overflow_only(
                 inp,Path(tmp)/'other',{'kjah':367_017_984})

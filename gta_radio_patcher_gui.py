@@ -41,7 +41,7 @@ OFFSET_MODE_LABELS = {
 # verified-to-build stock/preserve option and an EXPERIMENTAL shared table;
 # do not offer an unimplemented VCS station-specific mode.
 VCS_OFFSET_MODE_LABELS = {
-    "VCS: Original offsets (preserve existing executable)": "vcs-stock",
+    "VCS: Original offsets (corrected EE + IOP)": "vcs-stock",
     "VCS: Shared adaptive offsets (~5-second spacing; EXPERIMENTAL)": "vcs-shared",
 }
 DEFAULT_LCS_OFFSET_LABEL = "Combined: IOP safe seeks + patched ELF (shared adaptive offsets)"
@@ -56,8 +56,8 @@ OFFSET_MODE_DESCRIPTIONS = {
     "shared": "One duration-scaled shared sequence, using an extra ELF PT_LOAD near original game memory; heap-clobber risk is unverified. Experimental; compare against stock mode.",
     "station-specific": "Each station gets its own duration-scaled golden-stride sequence and independent cursor. Experimental MIPS helper/RWX ELF segment; test in PCSX2.",
     "stock": "Experimental ELF duration override with the stock random-offset table preserved. The original IOP already supplies native duration: prefer Native IOP mode unless comparing behavior.",
-    "vcs-stock": "VCS: keep the stock offset policy and preserve the input ISO executable and CDSTREAM.IRX during ISO installation. Standalone ELF button still applies/preserves its two known EE DIVU overflow corrections.",
-    "vcs-shared": "VCS EXPERIMENTAL: inject a 5-second-distribution shared offset table into the executable. Only original or known DIVU-only VCS EE accepted. CDSTREAM.IRX is preserved. New ELF PT_LOAD at 0x00780000 may conflict with runtime heap; PCSX2 safety and repeat reduction unverified.",
+    "vcs-stock": "VCS: retain stock offset distribution. Install the guarded EE position fix (signed for negative / unsigned for nonnegative) and the authenticated signed-position CDSTREAM.IRX patch. New EE load segment needs PCSX2 validation.",
+    "vcs-shared": "VCS EXPERIMENTAL: shared 5-second offset pool with guarded EE positions and corrected CDSTREAM.IRX; exact US revisions only. New ELF PT_LOAD at 0x00780000 may conflict with runtime heap; PCSX2 safety and repeat reduction unverified.",
 }
 
 
@@ -183,7 +183,7 @@ class DurationPatcherGUI:
             command=self._run_clicked,
         )
         self.run_button.pack(side="left", padx=(10, 0))
-        self.vcs_exe_fix_button = ttk.Button(action_bar, text="PATCH VCS EXECUTABLE (OVERFLOW ONLY)",
+        self.vcs_exe_fix_button = ttk.Button(action_bar, text="PATCH VCS EXECUTABLE (SIGNED-SAFE POSITION)",
                     command=self._patch_vcs_executable_clicked)
         self.vcs_exe_fix_button.pack(side="left", padx=(10, 0))
         irx_action_bar = ttk.Frame(outer, style="Card.TFrame", padding=(10, 5))
@@ -346,7 +346,7 @@ class DurationPatcherGUI:
         enabled = self._vcs_offsets_selected() if self.profile_key == 'vcs_ps2' else False
         self.vcs_exe_fix_button.configure(text=(
             "PATCH VCS EXECUTABLE (EE + ADAPTIVE OFFSETS · EXPERIMENTAL)" if enabled
-            else "PATCH VCS EXECUTABLE (OVERFLOW ONLY)"))
+            else "PATCH VCS EXECUTABLE (SIGNED-SAFE POSITION)"))
         self.vcs_iso_install_button.configure(text=(
             "INSTALL VCS RADIOS + OFFSET ELF INTO NEW ISO" if enabled
             else "INSTALL VCS RADIO(S) INTO NEW ISO"))
@@ -358,7 +358,7 @@ class DurationPatcherGUI:
             return
         self.profile_summary_var.set(profile.description)
         self.profile_status_var.set('ISO patch writer available (experimental)' if profile.can_build
-                                    else 'VCS ISO radio installer · offset mode in dropdown; IOP preserved')
+                                    else 'VCS ISO installer · signed-safe EE + patched IOP · offset mode in dropdown')
         self.validate_button.configure(text='Validate inputs' if profile.can_build else 'Analyze VCS files', state='normal')
         self.run_button.configure(state='normal' if profile.can_build and patcher and iso_patcher else 'disabled')
         modes = OFFSET_MODE_LABELS if profile.can_build else VCS_OFFSET_MODE_LABELS
@@ -376,8 +376,8 @@ class DurationPatcherGUI:
             self.game_warning_var.set('LCS PS2: experimental ELF and CDSTREAM.IRX patches; original source required. PCSX2 gameplay remains unverified.')
             self.game_inputs_help_var.set('LCS profile: SLUS_214.23 and original MODULES/CDSTREAM.IRX; ten radio .VB streams. Optional ENGLISH.GXT / GAME.DTZ in the VB folder are included automatically. Originals are never overwritten.')
         else:
-            self.game_warning_var.set('VCS PS2 target: 1 sec–4h39m per station. Exact-revision EE DIVU fix covers aligned streams to 4:39:37.152; IOP signed positions have an experimental MIPS fix; loader behaviour, EOF and ISO building remain unverified.')
-            self.game_inputs_help_var.set('VCS ISO installer: choose a filesystem-consistent US ISO and one or more station VBs. Optional adjustable +0.1 to +3.0 dB gain affects every detected replacement. The shared adaptive OFFSET DROPDOWN mode patches the game executable only when it is original or exactly EE-DIVU-only; any other pre-existing executable changes are refused. CDSTREAM.IRX is always preserved.')
+            self.game_warning_var.set('VCS PS2: guarded EE position and IOP signed-position patches are included in the ISO installer for authenticated US revisions. 1s–4h39m supported mathematically; runtime loader, heap and EOF behaviour unverified.')
+            self.game_inputs_help_var.set('VCS ISO installer: choose a filesystem-consistent US ISO and one or more station VBs. Optional adjustable +0.1 to +3.0 dB gain affects every detected replacement. Both offset dropdown modes apply a signed-safe EE guard and verify/install the corrected CDSTREAM.IRX. Original or exactly EE-DIVU-only executable and original/known-corrected IOP are required; unknown previous changes are rejected.')
 
     def _sync_gain_control(self):
         self.radio_gain_spinbox.configure(
@@ -1036,8 +1036,8 @@ class DurationPatcherGUI:
             self._log('ERROR VCS overflow-fix: ' + str(exc))
             return
         output = filedialog.asksaveasfilename(
-            title=('Save NEW VCS executable with experimental adaptive offsets'
-                   if self._vcs_offsets_selected() else 'Save NEW overflow-corrected VCS executable (not ISO)'),
+            title=('Save NEW guarded VCS executable with adaptive offsets'
+                   if self._vcs_offsets_selected() else 'Save NEW guarded VCS executable (not ISO)'),
             initialfile=('SLUS_215.90.offsets_experimental'
                          if self._vcs_offsets_selected() else 'SLUS_215.90.overflow_fixed'),
             filetypes=[('PS2 executable', '*.elf *.ELF *.90 *.*'), ('All files', '*.*')])
@@ -1051,29 +1051,28 @@ class DurationPatcherGUI:
                 self._log(f"VCS experimental adaptive offset ELF: {output}")
                 self._log(f"  New entries: {info['table_count']}; stride: {info['stride']}; "
                           f"average time distribution: {info['average_distribution_spacing_ms']} ms")
-                self._log(f"  New table VA {result['table_va']}; original load end: {result['original_ee_pt_load_memory_end']}")
+                self._log(f"  EE guard VA {result['ee_guard_va']}; adaptive offsets share its new PT_LOAD")
                 self._log('  HEAP/LOADER RISK UNVERIFIED: use disposable ISO and test in PCSX2.')
                 self.validation_var.set('VCS adaptive ELF generated (experimental)')
                 self.status_var.set('VCS standalone adaptive ELF generated; game ISO unchanged.')
                 messagebox.showwarning('Experimental VCS adaptive-offset ELF created',
                     f"New VCS executable saved: {output}\n\n{info['table_count']} shared offsets, "
                     f"~{info['average_distribution_spacing_ms']} ms apart in distribution.\n\n"
-                    'This patch preserves/applies the known EE DIVU corrections. The standalone file '
-                    'is NOT installed into your ISO, and the separate CDSTREAM.IRX fix is unchanged. '
+                    'This patch uses signed DIV for negative EE position operands and DIVU for nonnegative positions. '
+                    'The standalone executable is NOT installed into your ISO, and the separate CDSTREAM.IRX is unchanged. '
                     'Runtime heap/loader safety and reduced audible repeats have NOT been verified. '
                     'Use a disposable test image only.')
             else:
                 result = get_backend('vcs_ps2').patch_executable_overflow_only(
                     Path(source_text), Path(output), sizes)
                 self._log('VCS EE overflow fix written: ' + str(output))
-                for site in result['patches']:
-                    self._log(f"  {site['name']}: {site['original_opcode']} -> {site['patched_opcode']} at {site['runtime_address']}")
+                self._log(f"  EE signed/unsigned position guard installed at {result['ee_guard_va']}")
                 self.validation_var.set('VCS ELF corrected')
                 self.status_var.set('Standalone VCS ELF fixed; ISO installation and runtime tests still required.')
                 messagebox.showinfo('VCS executable written',
-                    'VCS 1-second–4h39m target: two signed divisions changed to unsigned for nonnegative time values.\n\n'
+                    'VCS 1-second–4h39m target: positive positions use DIVU, negative positions retain signed DIV behaviour.\n\n'
                     + str(output) + '\n\nThis does NOT fix your ISO filesystem, '
-                    'CDSTREAM.IRX signed-position arithmetic or 5-hour overflows. '
+                    'the CDSTREAM.IRX signed-position arithmetic until installed separately, nor 5-hour overflows. '
                     'Gameplay remains unverified.')
         except Exception as exc:
             self._log('ERROR VCS overflow-fix: ' + str(exc))
@@ -1122,10 +1121,10 @@ class DurationPatcherGUI:
                + ('\nEXPERIMENTAL VCS OFFSET ELF ENABLED: adds new ELF segment; only recognized '
                   'original or DIVU-only executable is permitted, unknown EE patches are REJECTED. '
                   'Heap/loader safety and in-game repeat improvement UNVERIFIED.\n' if expand_vcs_offsets
-                  else '\nAUDIO-ONLY: existing EE and IOP patches are preserved.\n')
-               + 'CDSTREAM.IRX is preserved byte-for-byte. Older anomalous/overlapping ISO records are rejected.\n\n'
+                  else '\nSTOCK OFFSETS: guarded EE position fix and corrected IOP will be installed.\n')
+               + 'CDSTREAM.IRX will be corrected if pristine or verified if already patched. Unknown IRX changes are rejected. Older overlapping ISO records are rejected.\n\n'
                  'Originals are never overwritten. Proceed?')
-        if not messagebox.askyesno('VCS radio audio-only ISO installation', msg, icon='warning'):
+        if not messagebox.askyesno('VCS radio and position patch ISO installation', msg, icon='warning'):
             return
         self.running = True
         self.validation_var.set('VCS ISO building')
@@ -1382,7 +1381,7 @@ class DurationPatcherGUI:
                     self._apply_profile_controls()
                     result=item[1]
                     self.validation_var.set('VCS radio ISO created')
-                    self.status_var.set(('Experimental adaptive-offset ISO created' if result.get('experimental_vcs_adaptive_offsets') else 'Audio-only ISO created') + '; PCSX2 playback not verified')
+                    self.status_var.set(('Experimental adaptive-offset ISO created' if result.get('experimental_vcs_adaptive_offsets') else 'Stock-offset corrected ISO created') + '; PCSX2 playback not verified')
                     self._log('VCS ISO created: ' + result['output_iso'])
                     for name, gain in result.get('gain_by_station', {}).items():
                         self._log(f'{name}: +{gain["requested_gain_db"]:g} dB requested; measured RMS gain {gain["measured_decoded_rms_gain_db"]:.3f} dB')
@@ -1392,20 +1391,20 @@ class DurationPatcherGUI:
                     if vcs_clipped_stations:
                         self._log(f'AUDIO CLIPPING WARNING: +{result.get("gain_db", 3):g} dB exceeds full scale for ' +
                                   ', '.join(vcs_clipped_stations) + '; actual RMS gain may be less than the target.')
-                    self._log('Original VCS CDSTREAM.IRX preserved and verified.')
+                    self._log(f"VCS CDSTREAM.IRX: {result['cdstream_patch_action']} and verified (SHA-256 {result['cdstream_output_sha256']}).")
                     vcs_report_warning = result.get('report_write_error')
                     if vcs_report_warning:
                         self._log('WARNING: ' + vcs_report_warning)
                     if result.get('experimental_vcs_adaptive_offsets'):
                         self._log(f"Expanded VCS EE random-offset table: {result['offset_patch_report']['offsets']['table_count']} values (loader/heap unverified).")
                     else:
-                        self._log('VCS executable also preserved and verified.')
+                        self._log('VCS executable signed-safe EE guard installed, original offset sequence retained.')
                     messagebox.showinfo('VCS ISO built',
                         f'New ISO created with {len(result["detected_replacement_stations"])} radio replacement(s).\n\n'
                         + result['output_iso'] + '\n\n'
                         + ('EXPERIMENTAL offset ELF included: runtime heap/loader safety and repeat reduction NOT verified. '
-                           if result.get('experimental_vcs_adaptive_offsets') else 'Existing EE and IRX preserved. ')
-                        + 'CDSTREAM.IRX preserved. Gain does not change fade-in timing. '
+                           if result.get('experimental_vcs_adaptive_offsets') else 'Stock offsets retained with guarded EE positions. ')
+                        + 'Corrected CDSTREAM.IRX installed/verified. Gain does not change fade-in timing. '
                           'Actual playback is not yet verified in PCSX2.'
                         + ('\n\nWARNING: ' + vcs_report_warning if vcs_report_warning else '')
                         + (f'\n\nAUDIO CLIPPING WARNING: +{result.get("gain_db", 3):g} dB exceeds full scale for '

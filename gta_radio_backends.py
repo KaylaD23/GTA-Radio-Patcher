@@ -120,15 +120,16 @@ class VCSPS2Backend:
 
     def patch_executable_overflow_only(self, pristine_executable: Path, new_executable: Path,
                                       replacement_sizes: Mapping[str, int] | None = None) -> dict:
-        """Write a separate, exact-revision SLUS_215.90 with the two proven
-        unsigned EE conversion changes. Does NOT touch any disc/ISO/IRX.
+        """Write a separate VCS EE with negative-safe guarded position handling.
+
+        This is an extended-ELF patch; execution remains PCSX2-unverified.
         """
-        from vcs_ee_overflow_patch import patch_file
+        from vcs_ee_guarded_position import patch_file
         replacements = replacement_sizes or {}
         unknown = set(replacements) - {name for name, _ in self.profile.stations}
         if unknown:
             raise ValueError(f'Unknown VCS station keys: {sorted(unknown)}')
-        return patch_file(Path(pristine_executable), Path(new_executable), list(replacements.values()))
+        return patch_file(Path(pristine_executable), Path(new_executable), replacements, adaptive=False)
 
     def patch_executable_with_adaptive_offsets(self, executable: Path, new_executable: Path,
                                                replacement_sizes: Mapping[str, int]) -> dict:
@@ -137,11 +138,11 @@ class VCSPS2Backend:
         Accepts exactly authenticated original or two-DIVU-only ELF; refuses
         every other patched variant, preserving unrecognized user changes.
         """
-        from vcs_adaptive_offsets import patch_file
+        from vcs_ee_guarded_position import patch_file
         unknown = set(replacement_sizes) - {name for name, _ in self.profile.stations}
         if unknown:
             raise ValueError(f'Unknown VCS station keys: {sorted(unknown)}')
-        return patch_file(Path(executable), Path(new_executable), replacement_sizes)
+        return patch_file(Path(executable), Path(new_executable), replacement_sizes, adaptive=True)
 
     def patch_cdstream_position_overflow_only(self, pristine_irx: Path, new_irx: Path,
                                               replacement_sizes: Mapping[str, int] | None = None) -> dict:

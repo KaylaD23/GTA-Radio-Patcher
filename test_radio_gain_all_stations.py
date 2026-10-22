@@ -63,7 +63,7 @@ class GenericRadioGainTests(unittest.TestCase):
     def test_vcs_non_vcpr_station_and_multiple_replacements(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);iso=root/'vcs.iso';out=root/'out.iso';folder=root/'inputs';folder.mkdir()
-            make_iso(iso,b'ELF__VCS_TEST',b'IRX__VCS_TEST')
+            make_iso(iso,(Path(__file__).with_name('SLUS_215.90.reference').read_bytes()),(Path(__file__).with_name('CDSTREAM_VCS_Experimental_Fixed.IRX').read_bytes()))
             raw=iso.read_bytes().replace(b'SLUS_214.23',b'SLUS_215.90').replace(b'KJAH.VB',b'VCPR.VB')
             iso.write_bytes(raw)
             generate_vb(folder/'VCPR.VB',pairs=4)
@@ -71,9 +71,10 @@ class GenericRadioGainTests(unittest.TestCase):
             original=Iso9660Image(iso)
             result=build_radio_audio_iso(input_iso=iso,replacement_vb=folder,output_iso=out,boost_radio_3db=True)
             self.assertEqual(set(result['gain_by_station']),{'FLASH.VB','VCPR.VB'})
-            self.assertEqual(set(result['iso_targets']),{'AUDIO/MUSIC/FLASH.VB','AUDIO/MUSIC/VCPR.VB'})
+            self.assertEqual(set(result['detected_replacement_stations']),{'FLASH.VB','VCPR.VB'})
+            self.assertIn('SLUS_215.90',result['iso_targets'])
             image=Iso9660Image(out)
-            self.assertEqual(image.read_entry_bytes('SLUS_215.90'),original.read_entry_bytes('SLUS_215.90'))
+            self.assertNotEqual(image.read_entry_bytes('SLUS_215.90'),original.read_entry_bytes('SLUS_215.90'))
             self.assertEqual(image.read_entry_bytes('MODULES/CDSTREAM.IRX'),original.read_entry_bytes('MODULES/CDSTREAM.IRX'))
             self.assertEqual(image.read_entry_bytes('AUDIO/MUSIC/HEAD.VB'),original.read_entry_bytes('AUDIO/MUSIC/HEAD.VB'))
             for name in ('VCPR.VB','FLASH.VB'):
@@ -160,7 +161,7 @@ class AllStationDetectionRegression(unittest.TestCase):
             iso=root/'vcs.iso';out=root/'out.iso'; folder=root/'all9';folder.mkdir()
             # Generate a synthetic ISO with the complete VCS station directory.
             with patch.object(patcher,'STATIONS',get_profile('vcs_ps2').stations):
-                fixture_make_iso(iso,b'VCS_TEST_EXECUTABLE',b'VCS_TEST_IRX')
+                fixture_make_iso(iso,(Path(__file__).with_name('SLUS_215.90.reference').read_bytes()),(Path(__file__).with_name('CDSTREAM_VCS_Experimental_Fixed.IRX').read_bytes()))
             data=iso.read_bytes().replace(b'SLUS_214.23',b'SLUS_215.90')
             iso.write_bytes(data)
             for name in names: generate_vb(folder/name.lower(),pairs=4)
@@ -170,7 +171,7 @@ class AllStationDetectionRegression(unittest.TestCase):
             self.assertEqual(set(result['detected_replacement_stations']),set(names))
             self.assertEqual(set(result['boosted_replacement_stations']),set(names))
             built=Iso9660Image(out)
-            self.assertEqual(built.read_entry_bytes('SLUS_215.90'),original.read_entry_bytes('SLUS_215.90'))
+            self.assertNotEqual(built.read_entry_bytes('SLUS_215.90'),original.read_entry_bytes('SLUS_215.90'))
             self.assertEqual(built.read_entry_bytes('MODULES/CDSTREAM.IRX'),original.read_entry_bytes('MODULES/CDSTREAM.IRX'))
             for name in names:
                 self.assertEqual(built.get('AUDIO/MUSIC/'+name).size,4*0x4000)
@@ -184,7 +185,7 @@ class AllStationDetectionRegression(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);iso=root/'in.iso';out=root/'out.iso';folder=root/'subset';folder.mkdir()
             with patch.object(patcher,'STATIONS',get_profile('vcs_ps2').stations):
-                fixture_make_iso(iso,b'VCS_TEST_EXECUTABLE',b'VCS_TEST_IRX')
+                fixture_make_iso(iso,(Path(__file__).with_name('SLUS_215.90.reference').read_bytes()),(Path(__file__).with_name('CDSTREAM_VCS_Experimental_Fixed.IRX').read_bytes()))
             iso.write_bytes(iso.read_bytes().replace(b'SLUS_214.23',b'SLUS_215.90'))
             for name in ('WAVE.VB','EMOTION.VB','PARADISE.VB'):
                 generate_vb(folder/name, pairs=3)

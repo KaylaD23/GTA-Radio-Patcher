@@ -286,7 +286,10 @@ def main() -> None:
         parser.error('Report destination already exists; refusing overwrite')
     if args.report and args.report.resolve() in {args.input.resolve(), args.output.resolve()}:
         parser.error('Report cannot collide with input/output')
-    report = patch_file(args.input, args.output, sizes)
+    # CLI always uses the signed-safe position guard; keep legacy
+    # build_executable() for its authenticated table-generation regression tests.
+    from vcs_ee_guarded_position import patch_file as guarded_patch_file
+    report = guarded_patch_file(args.input, args.output, sizes, adaptive=True)
     if args.report:
         args.report.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print(json.dumps(report, indent=2))

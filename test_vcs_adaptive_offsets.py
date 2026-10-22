@@ -136,7 +136,7 @@ class TestVCSISOOffsetIntegration(unittest.TestCase):
             iso, output, radio = root/'input.iso', root/'with_offsets.iso', root/'VCPR.VB'
             original = BINARY.read_bytes()
             with patch.object(lcs_patcher, 'STATIONS', get_profile('vcs_ps2').stations):
-                make_iso(iso, original, b'IRX_USER_POSITION_FIX_UNCHANGED')
+                make_iso(iso, original, (Path(__file__).with_name('CDSTREAM_VCS_Experimental_Fixed.IRX').read_bytes()))
             iso.write_bytes(iso.read_bytes().replace(b'SLUS_214.23', b'SLUS_215.90'))
             generate_vb(radio, pairs=4)
             source_hash = hashlib.sha256(iso.read_bytes()).hexdigest()
@@ -148,10 +148,10 @@ class TestVCSISOOffsetIntegration(unittest.TestCase):
             self.assertEqual(hashlib.sha256(iso.read_bytes()).hexdigest(), source_hash)
             built = Iso9660Image(output)
             self.assertNotEqual(built.read_entry_bytes('SLUS_215.90'), original)
-            self.assertEqual(built.read_entry_bytes('MODULES/CDSTREAM.IRX'), b'IRX_USER_POSITION_FIX_UNCHANGED')
+            self.assertEqual(built.read_entry_bytes('MODULES/CDSTREAM.IRX'), (Path(__file__).with_name('CDSTREAM_VCS_Experimental_Fixed.IRX').read_bytes()))
             self.assertEqual(built.read_entry_bytes('AUDIO/MUSIC/VCPR.VB'), radio.read_bytes())
             self.assertEqual(hashlib.sha256(built.read_entry_bytes('SLUS_215.90')).hexdigest(),
-                             result['offset_patch_report']['patched_sha256'])
+                             result['ee_position_guard_report']['patched_sha256'])
             self.assertEqual(built.volume_sectors * 2048, built.size)
 
     def test_invalid_and_conflicting_vcs_offset_modes_rejected_before_output(self):

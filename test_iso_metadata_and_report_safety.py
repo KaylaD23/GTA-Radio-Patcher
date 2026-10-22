@@ -50,7 +50,7 @@ class MetadataAndReportSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d); iso=root/'original.iso'; radio=root/'VCPR.VB'; out=root/'result.iso'; report=root/'reports'/'result.json'
             with patch.object(exe, 'STATIONS', get_profile('vcs_ps2').stations):
-                make_game_fixture(iso,b'EE',b'IRX')
+                make_game_fixture(iso,(Path(__file__).with_name('SLUS_215.90.reference').read_bytes()),(Path(__file__).with_name('CDSTREAM_VCS_Experimental_Fixed.IRX').read_bytes()))
             iso.write_bytes(iso.read_bytes().replace(b'SLUS_214.23',b'SLUS_215.90'))
             radio.write_bytes(b'\x0c\x00'+bytes(14)+bytes(3*0x4000-16))
             result=build_radio_audio_iso(input_iso=iso,replacement_vb=radio,output_iso=out,report_path=report)
@@ -63,7 +63,7 @@ class MetadataAndReportSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d); iso=root/'original.iso'; radio=root/'VCPR.VB'; out=root/'result.iso'; blocker=root/'blocked_parent';blocker.write_text('file')
             with patch.object(exe, 'STATIONS', get_profile('vcs_ps2').stations):
-                make_game_fixture(iso,b'EE',b'IRX')
+                make_game_fixture(iso,(Path(__file__).with_name('SLUS_215.90.reference').read_bytes()),(Path(__file__).with_name('CDSTREAM_VCS_Experimental_Fixed.IRX').read_bytes()))
             iso.write_bytes(iso.read_bytes().replace(b'SLUS_214.23',b'SLUS_215.90'))
             radio.write_bytes(b'\x0c\x00'+bytes(14)+bytes(3*0x4000-16))
             warnings=[]

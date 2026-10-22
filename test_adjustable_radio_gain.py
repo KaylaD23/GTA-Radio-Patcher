@@ -100,7 +100,7 @@ class IntegratedGainTests(unittest.TestCase):
     def test_vcs_multistation_low_gain(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); original=root/'vcs.iso'; target=root/'out.iso'; folder=root/'inputs'; folder.mkdir()
-            make_iso(original,b'ELF__VCS_TEST',b'IRX__VCS_TEST')
+            make_iso(original,(Path(__file__).with_name('SLUS_215.90.reference').read_bytes()),(Path(__file__).with_name('CDSTREAM_VCS_Experimental_Fixed.IRX').read_bytes()))
             original.write_bytes(original.read_bytes().replace(b'SLUS_214.23',b'SLUS_215.90').replace(b'KJAH.VB',b'VCPR.VB'))
             for name in ('VCPR.VB','FLASH.VB'):generate_vb(folder/name,pairs=3)
             report=build_radio_audio_iso(input_iso=original,replacement_vb=folder,

@@ -1,9 +1,9 @@
-"""VCS PS2 ISO installer: any station VB, optional 0.1-3.0 dB gain and offsets.
+"""VCS PS2 ISO installer: signed-safe EE and signed-position IOP updates.
 
-By default all executable and IOP code is preserved. The explicitly enabled
-adaptive-offset mode replaces ONLY a strictly recognized original or EE DIVU-
-only US VCS executable; unknown patches fail closed. Uses ISO9660 filesystem
-format tooling shared with LCS, never LCS game-specific opcode patching.
+Exact supported US executable and IOP revisions ONLY. A new ISO is built with
+verified EE and CDSTREAM corrections, optional adaptive offsets and audio gain.
+Unknown existing executable/module modifications fail closed; originals are
+never overwritten. New EE PT_LOAD/IOP module loading is unverified in PCSX2.
 """
 from __future__ import annotations
 
@@ -93,12 +93,11 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
                           expand_vcs_offsets: bool = False,
                           offset_mode: str | None = None,
                           progress: Progress = None, report_path: Path | None = None) -> dict:
-    """Create a NEW VCS USA ISO with any selected radio station(s) replaced.
+    """Create a NEW ISO, auto-adding signed-safe EE and known VCS IOP fixes.
 
-    By default, preserve the input ELF/IRX. Opt-in VCS offsets require an
-    authenticated original or the exact known two-DIVU-only executable; other
-    EE variants are rejected to avoid silently erasing existing user patches.
-    The IOP module is always preserved. The VCS PT_LOAD addition is experimental.
+    Reject unknown executable/streaming module modifications, including older
+    custom seek changes that cannot be proven equivalent. The original ISO is
+    never changed; the extra EE code segment still needs PCSX2 validation.
     """
     if boost_radio_3db:
         gain_db = validate_gain_db(gain_db)
@@ -139,25 +138,46 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
         original.get(iso_path)  # fail before transcoding if the ISO lacks the destination
     original_exe_bytes = original.read_entry_bytes(EXPECTED_BOOT)
     original_exe_sha = hashlib.sha256(original_exe_bytes).hexdigest()
-    original_irx_sha = hashlib.sha256(original.read_entry_bytes('MODULES/CDSTREAM.IRX')).hexdigest()
+    from vcs_ee_guarded_position import build_guarded_executable
+    from vcs_cdstream_signed_position_patch import build as build_iop, EXPECTED_SHA as IRX_ORIGINAL_SHA
+    from gta_radio_profiles import get_profile
+    original_irx_bytes = original.read_entry_bytes('MODULES/CDSTREAM.IRX')
+    original_irx_sha = hashlib.sha256(original_irx_bytes).hexdigest()
+    # These hashes are exact revision locks, not fuzzy opcode-pattern matches.
+    KNOWN_PATCHED_IRX_SHA = 'a29d2badb270e68d9851930ceedbb2fa7624b8708d20aec88657e8d5d2f0b695'
+    if original_irx_sha == IRX_ORIGINAL_SHA:
+        fixed_irx, iop_meta = build_iop(original_irx_bytes)
+        iop_action = 'applied'
+    elif original_irx_sha == KNOWN_PATCHED_IRX_SHA:
+        fixed_irx, iop_meta = original_irx_bytes, {'new_sha256': original_irx_sha}
+        iop_action = 'already-patched'
+    else:
+        raise ValueError('Unsupported VCS CDSTREAM.IRX revision or unknown previous modification; '
+                         'refusing to silently preserve unsafe position math')
+    expected_irx_sha = hashlib.sha256(fixed_irx).hexdigest()
+    if expected_irx_sha != KNOWN_PATCHED_IRX_SHA:
+        raise ValueError('VCS IOP patch output differs from authenticated reference')
+    file_keys = {name: key for key, name in get_profile('vcs_ps2').stations}
+    selected_sizes = {file_keys[name]: size for name, size in sizes.items()}
+    # Both stock and adaptive modes require a signed/unsigned EE position guard.
+    patched_ee, ee_report = build_guarded_executable(
+        original_exe_bytes, selected_sizes, adaptive=expand_vcs_offsets)
+    offset_report = ee_report.get('offset_patch_report')
+    expected_exe_sha = hashlib.sha256(patched_ee).hexdigest()
     gain_reports = {}
-    offset_report = None
-    expected_exe_sha = original_exe_sha
     with tempfile.TemporaryDirectory(prefix='gta_vcs_radio_') as tmp:
         staging = Path(tmp)
-        if expand_vcs_offsets:
-            from vcs_adaptive_offsets import build_executable
-            from gta_radio_profiles import get_profile
-            file_keys = {name: key for key, name in get_profile('vcs_ps2').stations}
-            selected_sizes = {file_keys[name]: size for name, size in sizes.items()}
-            patched_ee, offset_report = build_executable(original_exe_bytes, selected_sizes)
-            expected_exe_sha = hashlib.sha256(patched_ee).hexdigest()
-            elf_stage = staging / EXPECTED_BOOT
-            elf_stage.write_bytes(patched_ee)
-            destinations[EXPECTED_BOOT] = elf_stage
-            if progress:
-                progress(f"VCS EXPERIMENTAL: including {offset_report['offsets']['table_count']} shared offsets "
-                         f"in new ELF PT_LOAD (runtime heap safety unverified)")
+        elf_stage = staging / EXPECTED_BOOT
+        elf_stage.write_bytes(patched_ee)
+        destinations[EXPECTED_BOOT] = elf_stage
+        if iop_action == 'applied':
+            irx_stage = staging / 'CDSTREAM.IRX'
+            irx_stage.write_bytes(fixed_irx)
+            destinations['MODULES/CDSTREAM.IRX'] = irx_stage
+        if progress:
+            progress('VCS: including signed-safe EE position guard and '
+                     + ('corrected CDSTREAM.IRX' if iop_action == 'applied' else 'verified corrected CDSTREAM.IRX')
+                     + (' plus adaptive offsets' if expand_vcs_offsets else ' with stock offset distribution'))
         if boost_radio_3db:
             for name, src in replacements.items():
                 dst = staging / name
@@ -166,18 +186,18 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
         def post_verify(image):
             if hashlib.sha256(image.read_entry_bytes(EXPECTED_BOOT)).hexdigest() != expected_exe_sha:
                 raise IOError('Original/patched VCS executable changed unexpectedly')
-            if hashlib.sha256(image.read_entry_bytes('MODULES/CDSTREAM.IRX')).hexdigest() != original_irx_sha:
-                raise IOError('Original/patched VCS streaming module changed unexpectedly')
+            if hashlib.sha256(image.read_entry_bytes('MODULES/CDSTREAM.IRX')).hexdigest() != expected_irx_sha:
+                raise IOError('Corrected VCS streaming module not installed or corrupted')
             for name, size in sizes.items():
                 if image.get('AUDIO/MUSIC/' + name).size != size:
                     raise IOError(name + ': incorrect ISO replacement length')
         if progress:
             progress(f'Installing {len(replacements)} VCS station(s); ' +
-                     ('including experimental new offset ELF; preserving IOP…' if expand_vcs_offsets
-                      else 'retaining existing EE/IOP patches…'))
+                     ('including adaptive EE offsets + EE position guard + corrected IOP…' if expand_vcs_offsets
+                      else 'including EE position guard + corrected IOP; stock offsets…'))
         installed = apply_iso_replacements(input_iso, output_iso, destinations, progress, post_verify)
     result = {
-        'profile':'vcs_ps2', 'offset_mode':offset_mode, 'purpose':'Any-station VCS ISO installation (optional experimental offset EE)',
+        'profile':'vcs_ps2', 'offset_mode':offset_mode, 'purpose':'Any-station VCS ISO installation (EE guarded position + corrected IOP)',
         'input_iso':str(input_iso), 'output_iso':str(output_iso),
         'iso_targets':sorted(destinations), 'vb_input_bytes':sizes,
         'boost_radio_3db':bool(boost_radio_3db), # legacy enabled-flag key
@@ -187,13 +207,16 @@ def build_radio_audio_iso(*, input_iso: Path, replacement_vb: Path,
         'gain_by_station':gain_reports,
         'installed':installed, 'executable_input_sha256':original_exe_sha,
         'executable_output_sha256':expected_exe_sha,
-        'executable_preserved_sha256':(original_exe_sha if not expand_vcs_offsets else None),
+        'executable_preserved_sha256':None, # EE guard modifies executable in BOTH modes
         'experimental_vcs_adaptive_offsets':bool(expand_vcs_offsets),
-        'offset_patch_report':offset_report,
-        'cdstream_preserved_sha256':original_irx_sha, 'gameplay_verified':False,
-        'notice':('Experimental VCS shared offset ELF injected; runtime heap/loader safety unverified, IOP preserved.'
-                  if expand_vcs_offsets else 'EE, IOP and random-offset patch code preserved but not added.')
-                 + ' Gain adjustment does not fix fade-in timing.'
+        'offset_patch_report':offset_report, 'ee_position_guard_report':ee_report,
+        'cdstream_input_sha256':original_irx_sha, 'cdstream_output_sha256':expected_irx_sha,
+        'cdstream_patch_action':iop_action,
+        'cdstream_preserved_sha256':(original_irx_sha if iop_action == 'already-patched' else None),
+        'iop_patch_report':iop_meta, 'gameplay_verified':False,
+        'notice':'EE guarded conversion + IOP signed-position arithmetic verified in output; '
+                 'EE added PT_LOAD and IOP module runtime loading NOT PCSX2-verified. '
+                 'Gain adjustment does not fix fade-in timing.'
     }
     if len(replacements) == 1:
         name = next(iter(replacements))
